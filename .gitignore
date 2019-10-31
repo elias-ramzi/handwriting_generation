@@ -1,0 +1,14 @@
+admin/*
+**.pyc
+notebooks/.ipynb_checkpoints/*
+
+[Paper]
+1308.0850.pdf
+
+[Python]
+tmp/
+.venv/
+
+[Models]
+model*.h5
+models/logs/train/*
