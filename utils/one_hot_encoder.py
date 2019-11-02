@@ -7,6 +7,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 class OneHotEncoder(BaseEstimator, TransformerMixin):
 
     def __init__(self, allow_multiple=True):
+        # We set allow_multiple=True to get the number of the sentence
         self.allow_multiple = allow_multiple
 
     def fit(self, X, y=None):

@@ -19,7 +19,6 @@ class HandWritingPrediction(BaseModel):
     def __init__(
         self,
         train_seq_length=700,
-        _compile=True,
         lstm='stacked',
         regularizer_type='gaussian',
         reg_mean=0.,
@@ -50,56 +49,77 @@ class HandWritingPrediction(BaseModel):
             inf_backend=inf_backend,
         )
         self.train_seq_length = train_seq_length
-        self.compile = _compile
         assert lstm in ['single', 'stacked'],\
             "You should pass either lstm='single or stacked'"
         self.lstm = lstm
         self.regularizer = self.regularization()
         self.verbose = verbose
 
-    def _make_model(self, seq_length):
-
+    def _make_model(self, seq_length, train=True):
+        if not train:
+            seq_length = 1
         strokes = Input((seq_length, 3))
+        output_states = []
 
         if self.lstm == 'single':
+            stateh1 = Input(900)
+            statec1 = Input(900)
+            input_states = [stateh1, statec1]
             self.num_layers = 1
-            lstm = LSTM(
+            self.hidden_dim = 900
+            lstm, stateh1, statec1 = LSTM(
                 900,
                 name='h1',
                 return_sequences=True,
+                return_state=True,
                 kernel_regularizer=self.regularizer,
                 recurrent_regularizer=self.regularizer,
-            )(strokes)
+            )(strokes, initial_state=input_states)
+            output_states += [stateh1, statec1]
 
         elif self.lstm == 'stacked':
+            stateh1 = Input(400)
+            statec1 = Input(400)
+            stateh2 = Input(400)
+            statec2 = Input(400)
+            stateh3 = Input(400)
+            statec3 = Input(400)
+            input_states = [stateh1, statec1, stateh2, statec2, stateh3, statec3]
             self.num_layers = 3
-            lstm1 = LSTM(
+            self.hidden_dim = 400
+            lstm1, stateh1, statec1 = LSTM(
                 400,
                 return_sequences=True,
+                return_state=True,
                 kernel_regularizer=self.regularizer,
                 recurrent_regularizer=self.regularizer,
                 name='h1',
-                )(strokes)
+                )(strokes, initial_state=input_states[0:2])
+            output_states += [stateh1, statec1]
 
             # skip1 = Dense(400, name='Wih2', use_bias=False)(strokes)
             _input2 = Concatenate(name='Skip1')([strokes, lstm1])
-            lstm2 = LSTM(
+            lstm2, stateh2, statec2 = LSTM(
                 400,
                 return_sequences=True,
+                return_state=True,
                 kernel_regularizer=self.regularizer,
                 recurrent_regularizer=self.regularizer,
                 name='h2',
-            )(_input2)
+            )(_input2, initial_state=input_states[2:4])
+            output_states += [stateh2, statec2]
 
             # skip2 = Dense(400, name='Wih3', use_bias=False)(strokes)
             _input3 = Concatenate(name='Skip2')([strokes, lstm2])
-            lstm3 = LSTM(
+            lstm3, stateh3, statec3 = LSTM(
                 400,
                 return_sequences=True,
+                return_state=True,
                 kernel_regularizer=self.regularizer,
                 recurrent_regularizer=self.regularizer,
                 name='h3',
-                )(_input3)
+                )(_input3, initial_state=input_states[4:6])
+            output_states += [stateh3, statec3]
 
             # skip31 = Dense(400, name='Wh1y', use_bias=False)(lstm1)
             # skip32 = Dense(400, name='Wh2y', use_bias=False)(lstm2)
@@ -108,27 +128,15 @@ class HandWritingPrediction(BaseModel):
         y_hat = Dense(121, name='MixtureCoef')(lstm)
         mixture_coefs = self._mixture_coefs(y_hat)
 
-        model = Model(inputs=strokes, outputs=mixture_coefs)
+        model = Model(
+            inputs=[strokes, input_states],
+            outputs=[mixture_coefs, output_states]
+        )
 
-        if self.compile:
-            optimizer = tf.keras.optimizers.RMSprop(
-                    lr=self.lr,
-                    rho=self.rho,
-                    momentum=self.momentum,
-                    epsilon=self.epsilon,
-                    centered=self.centered,
-                    clipvalue=10,
-                )
-
-            model.compile(
-                optimizer,
-                loss=self.loss_function,
-            )
-
-        else:
-            self.to_clip += [f'h{i}/kernel:0' for i in range(1, self.num_layers+1)]
-            self.to_clip += [f'h{i}/recurrent_kernel:0' for i in range(1, self.num_layers+1)]
-            self.to_clip += [f'h{i}/bias:0' for i in range(1, self.num_layers+1)]
+        # Used for gradient cliping
+        self.to_clip += [f'h{i}/kernel:0' for i in range(1, self.num_layers+1)]
+        self.to_clip += [f'h{i}/recurrent_kernel:0' for i in range(1, self.num_layers+1)]
+        self.to_clip += [f'h{i}/bias:0' for i in range(1, self.num_layers+1)]
 
         return model
 
@@ -151,11 +159,12 @@ class HandWritingPrediction(BaseModel):
         if not hasattr(self, 'infer_model'):
             self.make_infer_model(weights_path=weights_path)
         X = tf.zeros((1, 1, 3))
+        input_states = [tf.zeros((1, self.hidden_dim))] * 2 * self.num_layers
         strokes = []
         for _ in tqdm(range(length), desc='Creating a series of strokes'):
-            mixture_coefs = self.infer_model.predict(X)
+            mixture_coefs, output_states = self.infer_model([X, input_states], training=False)
             end_stroke, x, y = self._infer(mixture_coefs, inf_type)
-            X = np.array([x, y, end_stroke])
-            X = X.reshape((1, 1, 3))
+            X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
+            input_states = output_states
             strokes.append((end_stroke, x, y))
         return np.vstack(strokes)
