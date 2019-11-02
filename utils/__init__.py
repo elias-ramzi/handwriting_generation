@@ -3,6 +3,8 @@ from matplotlib import pyplot
 
 from utils.one_hot_encoder import OneHotEncoder
 
+__all__ = ['OneHotEncoder', 'plot_stroke']
+
 
 def plot_stroke(stroke, save_name=None):
     # Plot a single example.

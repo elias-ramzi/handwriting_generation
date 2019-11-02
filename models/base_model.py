@@ -124,7 +124,7 @@ class BaseModel(ABC):
         )
         return tf.reduce_mean(loss)  # / normal.shape[1]
 
-    def train(self, strokes, targets, load_weights=None):
+    def train(self, strokes, input_states, targets, load_weights=None):
         """
         adapted from
         https://github.com/tensorflow/tensorflow/issues/28707
@@ -141,7 +141,7 @@ class BaseModel(ABC):
         )
 
         with tf.GradientTape() as tape:
-            predictions = self.model(strokes, training=True)
+            predictions, _ = self.model([strokes, input_states], training=True)
             loss = self.loss_function(targets, predictions)
 
             gradients = tape.gradient(loss, self.model.trainable_variables)
@@ -171,7 +171,7 @@ class BaseModel(ABC):
         cov_matrix = [[sigma1**2, _autocov], [_autocov, sigma2**2]]
         return np.random.multivariate_normal([mu1, mu2], cov_matrix, 1)
 
-    def _infer(self, mixture_coefs, inf_type=None):
+    def _infer(self, mixture_coefs, inf_type=None, bias=None):
         if inf_type is None:
             inf_type = self.inf_type
         e = np.squeeze(mixture_coefs[:, :, :1])
@@ -181,6 +181,11 @@ class BaseModel(ABC):
         sigma1 = np.squeeze(mixture_coefs[:, :, 61: 81])
         sigma2 = np.squeeze(mixture_coefs[:, :, 81: 101])
         rho = np.squeeze(mixture_coefs[:, :, 101:121])
+
+        if bias is not None:
+            sigma1 = tf.math.exp(sigma1 - bias)
+            sigma2 = tf.math.exp(sigma2 - bias)
+            pi = tf.nn.softmax(pi*(1+bias))
 
         end_stroke = 1 if np.random.rand() < e else 0
 
@@ -194,7 +199,7 @@ class BaseModel(ABC):
                 sigma1=sigma1[i], sigma2=sigma2[i],
                 rho=rho[i],
             ) for i in range(20))
-            offsets = np.sum(_offsets, axis=0)
+            offsets = np.sum(_offsets * pi, axis=0)
         else:
             idx_max = pi.argmax()
             offsets = BaseModel._sample(

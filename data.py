@@ -43,7 +43,7 @@ class Data(ABC):
         return self._sentences.copy()
 
     @abstractmethod
-    def batch_generator(self, sequence_lenght, batch_size=10, shuffle=True):
+    def batch_generator(self, sequence_lenght, batch_size=10):
         raise NotImplementedError
 
 
@@ -60,7 +60,6 @@ class DataPrediction(Data):
             batch_targets = []
             for _ in range(batch_size):
                 strokes = tf.image.random_crop(all_strokes, (sequence_lenght+1, 3))
-                # strokes = all_strokes[:sequence_lenght+1]
                 # batch_strokes.append(tf.concat((tf.zeros((1, 3)), strokes[:-1, :]), axis=0))
                 batch_strokes.append(strokes[:-1, :])
                 batch_targets.append(strokes[1:, :])
@@ -86,11 +85,16 @@ class DataSynthesis(Data):
     def batch_generator(self, batch_size=10, shuffle=True):
         all_strokes = self.strokes
         all_sentences = self.sentences
+        idx = np.arange(0, all_sentences.shape[0])
         while True:
+            if shuffle:
+                np.random.shuffle(idx)
+
             batch_strokes = []
             batch_sentences = []
             batch_targets = []
-            for strokes, sentences in zip(all_strokes, all_sentences):
+            for it in idx:
+                strokes, sentences = all_strokes[idx], all_sentences[idx]
                 # We want (x3, x1, x2) --> (x1, x2, x3)
                 strokes = tf.gather(strokes, [1, 2, 0], axis=1)
                 batch_strokes.append(strokes[:-1, :])
