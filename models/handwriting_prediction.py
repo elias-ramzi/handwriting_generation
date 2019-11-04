@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
     Input, LSTM,
-    Dense, Add, Concatenate
+    Dense, Concatenate
 )
 from tqdm import tqdm
 
@@ -133,7 +133,7 @@ class HandWritingPrediction(BaseModel):
             outputs=[mixture_coefs, output_states]
         )
 
-        # Used for gradient cliping
+        # Used for gradient cliping the lstm's
         self.to_clip += [f'h{i}/kernel:0' for i in range(1, self.num_layers+1)]
         self.to_clip += [f'h{i}/recurrent_kernel:0' for i in range(1, self.num_layers+1)]
         self.to_clip += [f'h{i}/bias:0' for i in range(1, self.num_layers+1)]
@@ -155,9 +155,15 @@ class HandWritingPrediction(BaseModel):
         else:
             self.infer_model.load_weights(weights_path)
 
-    def infer(self, length=700, inf_type=None, weights_path=None):
+    def infer(self, seed=0, inf_type=None, weights_path=None):
         if not hasattr(self, 'infer_model'):
             self.make_infer_model(weights_path=weights_path)
+        np.random.seed(seed)
+        length = np.random.randint(400, 1200)
+        print()
+        print("Generating a random sentence of \033[92m {length}\033[00m strokes")
+        print()
+
         X = tf.zeros((1, 1, 3))
         input_states = [tf.zeros((1, self.hidden_dim))] * 2 * self.num_layers
         strokes = []

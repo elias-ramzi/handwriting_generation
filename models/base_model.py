@@ -122,9 +122,10 @@ class BaseModel(ABC):
             - bernoulli,
             axis=1
         )
-        return tf.reduce_mean(loss)  # / normal.shape[1]
+        loss = tf.reduce_mean(loss)  # / normal.shape[1]
+        return loss
 
-    def train(self, strokes, input_states, targets, load_weights=None):
+    def train(self, inputs, targets, load_weights=None):
         """
         adapted from
         https://github.com/tensorflow/tensorflow/issues/28707
@@ -141,11 +142,14 @@ class BaseModel(ABC):
         )
 
         with tf.GradientTape() as tape:
-            predictions, _ = self.model([strokes, input_states], training=True)
+            outputs = self.model(inputs, training=True)
+            predictions = outputs[0]
+            targets = tf.dtypes.cast(targets, dtype=float)
             loss = self.loss_function(targets, predictions)
 
             gradients = tape.gradient(loss, self.model.trainable_variables)
 
+        model = self.model
         # Clips gradient for output Dense layer
         gradients[-1] = tf.clip_by_value(gradients[-1], -100.0, 100.0)
         gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
@@ -188,9 +192,6 @@ class BaseModel(ABC):
             pi = tf.nn.softmax(pi*(1+bias))
 
         end_stroke = 1 if np.random.rand() < e else 0
-
-        from tensorflow_probability.distributions import MultivariateNormalFullCovariance
-        import ipdb; ipdb.set_trace()
 
         if inf_type == 'sum':
             _offsets = Parallel(

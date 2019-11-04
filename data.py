@@ -19,14 +19,23 @@ class Data(ABC):
         self.path_to_data = path_to_data
         self.path_to_sentences = path_to_sentences
         self.clean_text = clean_text
-        self.encoder = OneHotEncoder(allow_multiple=allow_multiple)
+        self.encoder = OneHotEncoder()
+        # padd with one, to have the pen lifted
+        self.padding = [[1, 0, 0]]
 
     @property
     def strokes(self):
         if not hasattr(self, '_strokes'):
             strokes = np.load(self.path_to_data, allow_pickle=True)
+            self._max_length = max(map(len, strokes))
             self._strokes = strokes
         return self._strokes.copy()
+
+    @property
+    def max_length(self):
+        if not hasattr(self, '_max_length'):
+            _ = self.strokes
+        return self._max_length
 
     @property
     def sentences(self):
@@ -40,7 +49,15 @@ class Data(ABC):
 
             texts = texts.split('\n')
             self._sentences = self.encoder.fit_transform(texts)
+            self._char_length = max(map(len, self._sentences))
+            self.char_padding = [[0] * len(self._sentences[0][0])]
         return self._sentences.copy()
+
+    @property
+    def char_length(self):
+        if not hasattr(self, '_char_length'):
+            _ = self.sentences
+        return self._char_length
 
     @abstractmethod
     def batch_generator(self, sequence_lenght, batch_size=10):
@@ -73,19 +90,17 @@ class DataSynthesis(Data):
         path_to_sentences='data/sentences.txt',
         clean_text=True,
         path_to_data='data/strokes-py3.npy',
-        allow_multiple=False,
     ):
         super(DataSynthesis, self).__init__(
             path_to_data=path_to_data,
             path_to_sentences=path_to_sentences,
             clean_text=clean_text,
-            allow_multiple=allow_multiple,
         )
 
-    def batch_generator(self, batch_size=10, shuffle=True):
+    def batch_generator(self, batch_size=1, shuffle=True):
         all_strokes = self.strokes
         all_sentences = self.sentences
-        idx = np.arange(0, all_sentences.shape[0])
+        idx = np.arange(0, len(all_sentences))
         while True:
             if shuffle:
                 np.random.shuffle(idx)
@@ -94,7 +109,12 @@ class DataSynthesis(Data):
             batch_sentences = []
             batch_targets = []
             for it in idx:
-                strokes, sentences = all_strokes[idx], all_sentences[idx]
+                strokes, sentences = all_strokes[it], all_sentences[it]
+                strokes = np.vstack((strokes, self.padding*(self.max_length-strokes.shape[0])))
+                sentences = np.vstack((
+                    sentences,
+                    self.char_padding*(self.char_length-sentences.shape[0])
+                ))
                 # We want (x3, x1, x2) --> (x1, x2, x3)
                 strokes = tf.gather(strokes, [1, 2, 0], axis=1)
                 batch_strokes.append(strokes[:-1, :])
@@ -102,9 +122,9 @@ class DataSynthesis(Data):
                 batch_targets.append(strokes[1:, :])
                 if len(batch_strokes) == batch_size:
                     yield (
-                        tf.stack(batch_strokes),
-                        tf.stack(batch_sentences),
-                        tf.stack(batch_targets)
+                        tf.dtypes.cast(tf.stack(batch_strokes), dtype=float),
+                        tf.dtypes.cast(tf.stack(batch_sentences), dtype=float),
+                        tf.dtypes.cast(tf.stack(batch_targets), dtype=float),
                     )
                     batch_strokes = []
                     batch_sentences = []

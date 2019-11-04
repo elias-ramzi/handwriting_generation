@@ -21,7 +21,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 MODEL_PATH = 'models/trained/model_stacked_overfit.h5'
 EPOCH_MODEL_PATH = 'models/trained/model_overfit_{epoch}.h5'
-LOAD_PREVIOUS = 'models/trained/stacked_200epochs.h5'
+LOAD_PREVIOUS = None
 SEQUENCE_LENGTH = 700
 
 DATA_PATH = 'data/strokes-py3.npy'
@@ -71,8 +71,8 @@ if VERBOSE:
         )
     )
 fit_kwargs = {
-    'steps_per_epoch': 100,
-    'epochs': 150,
+    'steps_per_epoch': 1,
+    'epochs': 10,
     'callbacks': callbacks,
 }
 
@@ -99,7 +99,7 @@ try:
         train_loss = []
         for s in tqdm(range(fit_kwargs['steps_per_epoch']), desc=f"Epoch {e}/{fit_kwargs['epochs']}"):
             strokes, targets = next(generator)
-            loss = hwp.train(strokes, input_states, targets)
+            loss = hwp.train([strokes, input_states], targets)
             train_loss.append(loss)
 
             if loss is np.nan:
@@ -127,8 +127,8 @@ if not nan:
 # '''''''''''''''''''''''''''''''EVALUATE'''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-strokes1 = hwp.infer(700)
+strokes1 = hwp.infer(seed=23)
 plot_stroke(strokes1)
-strokes2 = hwp.infer(700, 'sum')
-plot_stroke(strokes2)
+# strokes2 = hwp.infer(700, 'sum')
+# plot_stroke(strokes2)
 import ipdb; ipdb.set_trace()
