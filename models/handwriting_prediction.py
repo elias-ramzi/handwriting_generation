@@ -155,8 +155,8 @@ class HandWritingPrediction(BaseModel):
         else:
             self.infer_model.load_weights(weights_path)
 
-    def infer(self, seed=0, inf_type=None, weights_path=None):
-        if not hasattr(self, 'infer_model'):
+    def infer(self, seed=0, inf_type=None, weights_path=None, reload=False):
+        if not hasattr(self, 'infer_model') or reload:
             self.make_infer_model(weights_path=weights_path)
         np.random.seed(seed)
         length = np.random.randint(400, 1200)
