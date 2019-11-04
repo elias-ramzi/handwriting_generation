@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
     Input, LSTM,
-    Dense, Add, Concatenate
+    Dense, Concatenate
 )
 from tqdm import tqdm
 
@@ -55,7 +55,9 @@ class HandWritingPrediction(BaseModel):
         self.regularizer = self.regularization()
         self.verbose = verbose
 
-    def _make_model(self, seq_length):
+    def _make_model(self, seq_length, train=True):
+        if not train:
+            seq_length = 1
         strokes = Input((seq_length, 3))
         output_states = []
 
@@ -131,7 +133,7 @@ class HandWritingPrediction(BaseModel):
             outputs=[mixture_coefs, output_states]
         )
 
-        # Used for gradient cliping
+        # Used for gradient cliping the lstm's
         self.to_clip += [f'h{i}/kernel:0' for i in range(1, self.num_layers+1)]
         self.to_clip += [f'h{i}/recurrent_kernel:0' for i in range(1, self.num_layers+1)]
         self.to_clip += [f'h{i}/bias:0' for i in range(1, self.num_layers+1)]
@@ -153,17 +155,22 @@ class HandWritingPrediction(BaseModel):
         else:
             self.infer_model.load_weights(weights_path)
 
-    def infer(self, length=700, inf_type=None, weights_path=None, reload=False):
+    def infer(self, seed=0, inf_type=None, weights_path=None, reload=False):
         if not hasattr(self, 'infer_model') or reload:
             self.make_infer_model(weights_path=weights_path)
+        np.random.seed(seed)
+        length = np.random.randint(400, 1200)
+        print()
+        print("Generating a random sentence of \033[92m {length}\033[00m strokes")
+        print()
+
         X = tf.zeros((1, 1, 3))
         input_states = [tf.zeros((1, self.hidden_dim))] * 2 * self.num_layers
         strokes = []
         for _ in tqdm(range(length), desc='Creating a series of strokes'):
             mixture_coefs, output_states = self.infer_model([X, input_states], training=False)
             end_stroke, x, y = self._infer(mixture_coefs, inf_type)
-            X = np.array([x, y, end_stroke])
-            X = X.reshape((1, 1, 3))
+            X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
             input_states = output_states
             strokes.append((end_stroke, x, y))
         return np.vstack(strokes)

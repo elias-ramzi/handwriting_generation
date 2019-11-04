@@ -16,7 +16,7 @@ from models import HandWritingPrediction
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 # '''''''''''''''''''''''''''CONFIG'''''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 
 MODEL_PATH = 'models/trained/model_stacked_overfit.h5'
@@ -71,8 +71,8 @@ if VERBOSE:
         )
     )
 fit_kwargs = {
-    'steps_per_epoch': 100,
-    'epochs': 600,
+    'steps_per_epoch': 1,
+    'epochs': 10,
     'callbacks': callbacks,
 }
 
@@ -94,12 +94,12 @@ input_state = tf.zeros((train_generator_kwargs['batch_size'], HIDDEN_DIM))
 input_states = [input_state] * 2 * NUM_LAYERS
 try:
     # Test for overfitting
-    strokes, targets = next(generator)
+    # strokes, targets = next(generator)
     for e in range(1, fit_kwargs['epochs'] + 1):
         train_loss = []
         for s in tqdm(range(fit_kwargs['steps_per_epoch']), desc=f"Epoch {e}/{fit_kwargs['epochs']}"):
-            # strokes, targets = next(generator)
-            loss = hwp.train(strokes, input_states, targets)
+            strokes, targets = next(generator)
+            loss = hwp.train([strokes, input_states], targets)
             train_loss.append(loss)
 
             if loss is np.nan:
@@ -110,7 +110,7 @@ try:
         mean_loss = np.mean(train_loss)
         print(f"Epoch {e:03d}: Loss: {mean_loss:.3f}")
 
-        if e % 20 == 0:
+        if e % 1 == 0:
             hwp.model.save_weights(f'models/trained/model_overfit_{e}.h5')
 
         if nan:
@@ -127,7 +127,7 @@ if not nan:
 # '''''''''''''''''''''''''''''''EVALUATE'''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-strokes1 = hwp.infer(length=700)
+strokes1 = hwp.infer(seed=23)
 plot_stroke(strokes1)
 # strokes2 = hwp.infer(700, 'sum')
 # plot_stroke(strokes2)

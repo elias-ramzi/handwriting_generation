@@ -1,52 +1,52 @@
-from collections import Counter
-
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
 class OneHotEncoder(BaseEstimator, TransformerMixin):
 
-    def __init__(self, allow_multiple=True):
-        # We set allow_multiple=True to get the number of the sentence
-        self.allow_multiple = allow_multiple
-
     def fit(self, X, y=None):
         """
-        X is a list of strings
+        X is a list of list of single characters
+
+        X = [
+            ["e", "l", "i", "a", "s"],
+        ]
         """
-        vocab = set("".join(X))
-        self.vocab = dict(zip(vocab, range(len(vocab))))
-        self.inv_vocab = dict(zip(range(len(vocab)), vocab))
+        vocab = set()
+        for x in X:
+            vocab.update(set(x))
+        self.vocab = dict(zip(vocab, range(1, len(vocab)+1)))
+        self.inv_vocab = dict(zip(range(1, len(vocab)+1), vocab))
         return self
 
     def transform(self, X):
         """
         X is a list of strings
         """
-        encoded = np.zeros((len(X), len(self.vocab)))
-        for i, text in enumerate(X):
-            if self.allow_multiple:
-                voc = Counter(text)
-                for letter, n in voc.items():
-                    encoded[i][self.vocab[letter]] = n
-            else:
-                voc = set(text)
-                for letter in voc:
-                    encoded[i][self.vocab[letter]] = 1
+        embeded = []
+        for text in X:
+            encoded = np.zeros((len(text), len(self.vocab)))
+            for i, letter in enumerate(text):
+                encoded[i][self.vocab[letter]-1] = 1
+            embeded.append(encoded)
 
-        return encoded
+        return embeded
 
     def inverse_transform(self, s):
         """
-        It does not really computes the inverse transform
+        It does not really computes the full inverse transform
         It makes it easier to debug
         """
-        sentence = {}
-        for i, count in enumerate(s):
-            # count == 1 if not self.allow_multiple
-            if count > 0:
-                sentence[self.inv_vocab[int(i)]] = count
-        return sentence
+        s = np.array(s)
+        sentences = []
+        for encoded in s:
+            inv = []
+            for letter in encoded:
+                if (letter == 0).all():
+                    break
+                inv.append(self.inv_vocab[letter.argmax()+1])
+            sentences.append(inv)
+        return sentences
 
 
 if __name__ == '__main__':

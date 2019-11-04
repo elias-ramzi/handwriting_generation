@@ -4,7 +4,7 @@ import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
 
-from data import DataPrediction
+from data import DataSynthesis
 from utils import plot_stroke
 from models import HandWritingSynthesis
 
@@ -34,8 +34,8 @@ model_kwargs = {
     'inf_type': 'max',
 }
 
-HIDDEN_DIM = 900 if model_kwargs['lstm'] == 'single' else 400
-NUM_LAYERS = 1 if model_kwargs['lstm'] == 'single' else 3
+HIDDEN_DIM = 400
+NUM_LAYERS = 3
 
 data_kwargs = {
     'path_to_data': DATA_PATH,
@@ -46,8 +46,8 @@ train_generator_kwargs = {
     'shuffle': True,
 }
 
-EPOCHS = 150
-STEPS_PER_EPOCH = 200
+EPOCHS = 10
+STEPS_PER_EPOCH = 100
 
 # bias for writing ~~style~~
 BIAS = None
@@ -57,8 +57,15 @@ BIAS = None
 # '''''''''''''''''''''''''''TRAIN'''''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-D = DataPrediction(**data_kwargs)
-hws = HandWritingSynthesis(D.sentences.shape[1], **model_kwargs)
+D = DataSynthesis(**data_kwargs)
+WINDOW_SIZE = len(D.sentences[0][0])
+CHAR_LENGTH = D.char_length
+
+model_kwargs['vocab_size'] = WINDOW_SIZE
+# minus 1 because we take one element out for input and target
+model_kwargs['sequence_lenght'] = D.max_length - 1
+model_kwargs['char_length'] = CHAR_LENGTH
+hws = HandWritingSynthesis(**model_kwargs)
 hws.make_model(load_weights=LOAD_PREVIOUS)
 
 nan = False
@@ -66,17 +73,22 @@ generator = D.batch_generator(
     **train_generator_kwargs,
 )
 
-input_states = [tf.zeros((train_generator_kwargs['batch_size'], D.sentences.shape[1]))]
-input_state = tf.zeros((train_generator_kwargs['batch_size'], HIDDEN_DIM))
-input_states += [input_state] * 2 * NUM_LAYERS
+input_states = [
+    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
+    tf.zeros((1, WINDOW_SIZE), dtype=float), tf.zeros((1, 10), dtype=float), tf.zeros((1, CHAR_LENGTH + 1), dtype=float),
+    None,  # sentence
+    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
+    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
+]
 try:
     # Test for overfitting
-    # strokes, targets = next(generator)
+    strokes, sentence, targets = next(generator)
     for e in range(1, EPOCHS + 1):
         train_loss = []
         for s in tqdm(range(1, STEPS_PER_EPOCH+1), desc=f"Epoch {e}/{EPOCHS}"):
-            strokes, sentence, targets = next(generator)
-            loss = hws.train(strokes, input_states, targets)
+            # strokes, sentence, targets = next(generator)
+            input_states[5] = sentence
+            loss = hws.train([strokes, input_states], targets)
             train_loss.append(loss)
 
             if loss is np.nan:
@@ -104,8 +116,7 @@ if not nan:
 # '''''''''''''''''''''''''''''''EVALUATE'''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
-strokes1 = hws.infer(700)
+verbose_sentence = "".join(D.encoder.inverse_transform(sentence)[0])
+strokes1 = hws.infer(sentence, inf_type='max', verbose=verbose_sentence)
 plot_stroke(strokes1)
-strokes2 = hws.infer(700, 'sum')
-plot_stroke(strokes2)
 import ipdb; ipdb.set_trace()
