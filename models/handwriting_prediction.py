@@ -134,9 +134,9 @@ class HandWritingPrediction(BaseModel):
         )
 
         # Used for gradient cliping the lstm's
-        self.to_clip += [f'h{i}/kernel:0' for i in range(1, self.num_layers+1)]
-        self.to_clip += [f'h{i}/recurrent_kernel:0' for i in range(1, self.num_layers+1)]
-        self.to_clip += [f'h{i}/bias:0' for i in range(1, self.num_layers+1)]
+        self.to_clip += ['h{}/kernel:0'.format(i) for i in range(1, self.num_layers+1)]
+        self.to_clip += ['h{}/recurrent_kernel:0'.format(i) for i in range(1, self.num_layers+1)]
+        self.to_clip += ['h{}/bias:0'.format(i) for i in range(1, self.num_layers+1)]
 
         return model
 
@@ -161,16 +161,15 @@ class HandWritingPrediction(BaseModel):
         np.random.seed(seed)
         length = np.random.randint(400, 1200)
         print()
-        print("Generating a random sentence of \033[92m {length}\033[00m strokes")
+        print("Generating a random sentence of \033[92m {}\033[00m strokes".format(length))
         print()
 
         X = tf.zeros((1, 1, 3))
-        input_states = [tf.zeros((1, self.hidden_dim))] * 2 * self.num_layers
+        states = [tf.zeros((1, self.hidden_dim))] * 2 * self.num_layers
         strokes = []
         for _ in tqdm(range(length), desc='Creating a series of strokes'):
-            mixture_coefs, output_states = self.infer_model([X, input_states], training=False)
+            mixture_coefs, states = self.infer_model([X, states], training=False)
             end_stroke, x, y = self._infer(mixture_coefs, inf_type)
             X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
-            input_states = output_states
             strokes.append((end_stroke, x, y))
         return np.vstack(strokes)

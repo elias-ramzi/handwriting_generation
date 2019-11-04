@@ -37,7 +37,7 @@ class BaseModel(ABC):
         momentum=0.9,
         epsilon=0.0001,
         centered=True,
-        inf_type='sum',
+        inf_type='max',
         inf_n_jobs=-2,
         inf_backend='threading',
     ):
@@ -66,6 +66,13 @@ class BaseModel(ABC):
     @abstractmethod
     def _make_model(self):
         raise NotImplementedError
+
+    def debug(self, X):
+        """
+        Not elegant but usefull
+        """
+        import ipdb; ipdb.set_trace()
+        return X
 
     @staticmethod
     def _Normal(x1, x2, mu1, mu2, sigma1, sigma2, rho):
@@ -149,7 +156,6 @@ class BaseModel(ABC):
 
             gradients = tape.gradient(loss, self.model.trainable_variables)
 
-        model = self.model
         # Clips gradient for output Dense layer
         gradients[-1] = tf.clip_by_value(gradients[-1], -100.0, 100.0)
         gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
@@ -173,9 +179,9 @@ class BaseModel(ABC):
     ):
         _autocov = rho * sigma1 * sigma2
         cov_matrix = [[sigma1**2, _autocov], [_autocov, sigma2**2]]
-        return pi * np.random.multivariate_normal([mu1, mu2], cov_matrix, 1)
+        return np.random.multivariate_normal([mu1, mu2], cov_matrix, 1)
 
-    def _infer(self, mixture_coefs, inf_type=None, bias=None):
+    def _infer(self, mixture_coefs, inf_type='max', bias=None):
         if inf_type is None:
             inf_type = self.inf_type
         e = np.squeeze(mixture_coefs[:, :, :1])

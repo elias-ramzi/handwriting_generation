@@ -2,12 +2,12 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import (
-    Input, LSTM, RNN,
-    Dense, Concatenate,
+    Input, RNN,
+    Dense,
 )
 
 from models.base_model import BaseModel
-from models.custom_layer import WindowedLSTMCell
+from models.custom_layer_2 import WindowedLSTMCell
 
 
 class SamplingFinished(Exception):
@@ -61,84 +61,49 @@ class HandWritingSynthesis(BaseModel):
     def _make_model(self):
 
         strokes = Input((None, 3), batch_size=1, name='strokes')
-        sentence = Input((self.char_length, self.vocab_size), batch_size=1, name='sentence')
-        in_window = Input((self.vocab_size), batch_size=1, name='inWindow')
-        kappa = Input(10, batch_size=1, name='kappa')
-        phi = Input(self.char_length + 1, batch_size=1, name='phi')
+
         stateh1 = Input(400, batch_size=1, name='stateh1')
         statec1 = Input(400, batch_size=1, name='statec1')
         stateh2 = Input(400, batch_size=1, name='stateh2')
         statec2 = Input(400, batch_size=1, name='statec2')
         stateh3 = Input(400, batch_size=1, name='stateh3')
         statec3 = Input(400, batch_size=1, name='statec3')
+        sentence = Input((self.char_length, self.vocab_size), batch_size=1, name='sentence')
+        in_window = Input((self.vocab_size), batch_size=1, name='inWindow')
+        kappa = Input(10, batch_size=1, name='kappa')
+        phi = Input(self.char_length + 1, batch_size=1, name='phi')
         input_states = [
             stateh1, statec1,
-            in_window, kappa, phi, sentence,
             stateh2, statec2,
             stateh3, statec3,
+            in_window, kappa, phi, sentence,
         ]
 
-        wlstm1, stateh1, statec1, out_window, kappa, phi, _ = RNN(
+        ouputs = RNN(
             cell=WindowedLSTMCell(
                 units=400,
-                window_size=self.vocab_size,
+                vocab_size=self.vocab_size,
                 char_length=self.char_length,
                 mixtures=30,
             ),
             return_sequences=True,
             return_state=True,
-            name='h1'
         )(
             inputs=strokes,
-            initial_state=input_states[0:6]
+            initial_state=input_states
         )
-        lstm1 = wlstm1[:, :, :400]
-        out_window = wlstm1[:, :, 400:]
+        wlstm = ouputs[0]
 
-        _input2 = Concatenate(name='skip1')([strokes, out_window, lstm1])
-        lstm2, stateh2, statec2 = LSTM(
-            400,
-            return_sequences=True,
-            return_state=True,
-            kernel_regularizer=self.regularizer,
-            recurrent_regularizer=self.regularizer,
-            name='h2',
-        )(_input2, initial_state=input_states[6:8])
-
-        _input3 = Concatenate(name='Skip2')([strokes, out_window, lstm2])
-        lstm3, stateh3, statec3 = LSTM(
-            400,
-            return_sequences=True,
-            return_state=True,
-            kernel_regularizer=self.regularizer,
-            recurrent_regularizer=self.regularizer,
-            name='h3',
-            )(_input3, initial_state=input_states[8:])
-
-        lstm = Concatenate(name='Skip3')([lstm1, lstm2, lstm3])
-        y_hat = Dense(121, name='MixtureCoef')(lstm)
+        y_hat = Dense(121, name='MixtureCoef')(wlstm)
         mixture_coefs = self._mixture_coefs(y_hat)
 
-        output_states = [
-            stateh1, statec1,
-            out_window, kappa, phi, sentence,
-            stateh2, statec2,
-            stateh3, statec3
-        ]
         model = Model(
             inputs=[strokes, input_states],
-            outputs=[mixture_coefs, output_states]
+            outputs=[mixture_coefs, ouputs[:1]]
         )
 
         # Used for gradient cliping the lstm's
-        self.to_clip += ['h{}/kernel:0'.format(i) for i in range(1, 3+1)]
-        self.to_clip += ['h{}/recurrent_kernel:0'.format(i) for i in range(1, 3+1)]
-        self.to_clip += ['h{}/bias:0'.format(i) for i in range(1, 3+1)]
-        # self.to_clip += [
-        #     'h1/window_kernel:0',
-        #     'h1/mixture_kernel:0',
-        #     'h1/bias_mixture:0',
-        # ]
+        self.to_clip = ['rnn/recurrent_kernel:0', 'rnn/kernel:0', 'rnn/bias:0']
 
         return model
 

@@ -97,21 +97,21 @@ try:
     # strokes, targets = next(generator)
     for e in range(1, fit_kwargs['epochs'] + 1):
         train_loss = []
-        for s in tqdm(range(fit_kwargs['steps_per_epoch']), desc=f"Epoch {e}/{fit_kwargs['epochs']}"):
+        for s in tqdm(range(fit_kwargs['steps_per_epoch']), desc="Epoch {}/{}".format(e, fit_kwargs['epochs'])):
             strokes, targets = next(generator)
             loss = hwp.train([strokes, input_states], targets)
             train_loss.append(loss)
 
             if loss is np.nan:
                 nan = True
-                print(f'exiting train @epoch : {e}')
+                print('exiting train @epoch : {}'.format(e))
                 break
 
         mean_loss = np.mean(train_loss)
-        print(f"Epoch {e:03d}: Loss: {mean_loss:.3f}")
+        print("Epoch {:03d}: Loss: {:.3f}".format(e, mean_loss))
 
         if e % 1 == 0:
-            hwp.model.save_weights(f'models/trained/model_overfit_{e}.h5')
+            hwp.model.save_weights('models/trained/model_overfit_{}.h5'.format(e))
 
         if nan:
             break

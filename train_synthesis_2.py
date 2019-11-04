@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from data import DataSynthesis
 from utils import plot_stroke
-from models.handwriting_synthesis import HandWritingSynthesis
+from models.handwriting_synthesis_2 import HandWritingSynthesis
 
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 # '''''''''''''''''''''''''''CONFIG'''''''''''''''''''''''''''''''''
@@ -46,9 +46,9 @@ train_generator_kwargs = {
     'shuffle': False,
 }
 
-EPOCHS = 20
+EPOCHS = 200
 STEPS_PER_EPOCH = 100
-MODEL_CHECKPOINT = 5
+MODEL_CHECKPOINT = 20
 
 # bias for writing ~~style~~
 BIAS = None
@@ -77,16 +77,16 @@ generator = D.batch_generator(
 input_states = [
     # stateh1, statec1
     tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
+    # stateh2, statec2
+    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
+    # stateh3, statec3
+    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
     # window kappa
     tf.zeros((1, WINDOW_SIZE), dtype=float), tf.zeros((1, 10), dtype=float),
     # phi
     tf.zeros((1, CHAR_LENGTH + 1), dtype=float),
     # sentence
     None,
-    # stateh2, statec2
-    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
-    # stateh3, statec3
-    tf.zeros((1, HIDDEN_DIM), dtype=float), tf.zeros((1, HIDDEN_DIM), dtype=float),
 ]
 try:
     # Test for overfitting
@@ -95,7 +95,7 @@ try:
         train_loss = []
         for s in tqdm(range(1, STEPS_PER_EPOCH+1), desc="Epoch {}/{}".format(e, EPOCHS)):
             # strokes, sentence, targets = next(generator)
-            input_states[5] = sentence
+            input_states[-1] = sentence
             loss = hws.train([strokes, input_states], targets)
             train_loss.append(loss)
 

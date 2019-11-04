@@ -44,7 +44,7 @@ class WindowedLSTMCell(Layer):
         # dropout=0.,
         # recurrent_dropout=0., Not implementing dropout for now
         # implementation=1,  the default is 2 in LSTM layer
-        **kwargs,
+        **kwargs
     ):
         super(WindowedLSTMCell, self).__init__(**kwargs)
         self.units = units
@@ -166,9 +166,9 @@ class WindowedLSTMCell(Layer):
         U = tf.range(start=1, limit=self.char_length+1)
         U = tf.dtypes.cast(tf.stack([U]*10, axis=1), dtype=float)
         phi = alpha * tf.math.exp(- beta * (kappa - U)**2)
-        phi = tf.reduce_sum(phi, axis=1, keepdims=True)
-        w = tf.reduce_sum(sentence * phi, axis=1)
+        phi = tf.reduce_sum(phi, axis=1)
         phi = tf.reshape(phi, (1, self.char_length))
+        w = tf.squeeze(tf.matmul(phi, sentence), axis=1)
         # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
         last_phi = tf.reduce_sum(
             alpha * tf.math.exp(- beta * (kappa - self.char_length+1)**2),
@@ -186,9 +186,11 @@ class WindowedLSTMCell(Layer):
         # that forces to input to be a tensor (and not a list)
         sentence = states[-1]
 
-        z = K.dot(inputs, self.kernel)
-        z += K.dot(h_tm1, self.recurrent_kernel)
-        z += K.dot(w_tm1, self.window_kernel)
+        z = (
+            K.dot(inputs, self.kernel)
+            + K.dot(h_tm1, self.recurrent_kernel)
+            + K.dot(w_tm1, self.window_kernel)
+        )
         z = K.bias_add(z, self.bias)
         z = tf.split(z, num_or_size_splits=4, axis=1)
         c, o = self._compute_carry_and_output_fused(z, c_tm1)

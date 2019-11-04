@@ -110,7 +110,6 @@ class DataSynthesis(Data):
             batch_targets = []
             for it in idx:
                 strokes, sentences = all_strokes[it], all_sentences[it]
-                strokes = np.vstack((strokes, self.padding*(self.max_length-strokes.shape[0])))
                 sentences = np.vstack((
                     sentences,
                     self.char_padding*(self.char_length-sentences.shape[0])
