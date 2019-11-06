@@ -37,6 +37,17 @@ class Data(ABC):
             _ = self.strokes
         return self._max_length
 
+    def prepare_text(self, text):
+        _ = self.sentences
+        text = re.sub('[^.,a-zA-Z!?\-\'" \n]', '#', text)
+        text = text.split('\n')
+        text = self.encoder.transform(text)[0]
+        text = np.vstack((
+            text,
+            self.char_padding*(self.char_length-text.shape[0])
+        ))
+        return tf.dtypes.cast(text.reshape((1,) + text.shape), float)
+
     @property
     def sentences(self):
         if not hasattr(self, '_sentences'):
@@ -44,8 +55,7 @@ class Data(ABC):
                 texts = f.read()
 
             if self.clean_text:
-                texts = texts.replace(' ', '')
-                texts = re.sub('[^.,a-zA-Z!?\-\'"\n]', '#', texts)
+                texts = re.sub('[^.,a-zA-Z!?\-\'" \n]', '#', texts)
 
             texts = texts.split('\n')
             self._sentences = self.encoder.fit_transform(texts)

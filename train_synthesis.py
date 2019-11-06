@@ -46,9 +46,9 @@ train_generator_kwargs = {
     'shuffle': False,
 }
 
-EPOCHS = 20
-STEPS_PER_EPOCH = 100
-MODEL_CHECKPOINT = 5
+EPOCHS = 1
+STEPS_PER_EPOCH = 1
+MODEL_CHECKPOINT = 2
 
 # bias for writing ~~style~~
 BIAS = None
@@ -64,7 +64,6 @@ CHAR_LENGTH = D.char_length
 
 model_kwargs['vocab_size'] = WINDOW_SIZE
 # minus 1 because we take one element out for input and target
-model_kwargs['sequence_lenght'] = D.max_length - 1
 model_kwargs['char_length'] = CHAR_LENGTH
 hws = HandWritingSynthesis(**model_kwargs)
 hws.make_model(load_weights=LOAD_PREVIOUS)
@@ -125,6 +124,6 @@ if not nan:
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 verbose_sentence = "".join(D.encoder.inverse_transform(sentence)[0])
-strokes1 = hws.infer(sentence, inf_type='max', verbose=verbose_sentence)
+strokes1, _, _, _ = hws.infer(sentence, inf_type='max', verbose=verbose_sentence)
 plot_stroke(strokes1)
 import ipdb; ipdb.set_trace()

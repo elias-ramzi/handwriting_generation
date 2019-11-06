@@ -24,14 +24,12 @@ class WindowedLSTMCell(Layer):
         mixtures,
         activation='tanh',
         recurrent_activation='sigmoid',
-        # use_bias=True, force to True to make it easier to implement
         kernel_initializer='glorot_uniform',
         recurrent_initializer='orthogonal',
         window_initializer='glorot_uniform',
         bias_initializer='zeros',
         mixture_initializer='glorot_uniform',
         bias_mixture_initializer='zeros',
-        # unit_forget_bias=True,
         kernel_regularizer=None,
         recurrent_regularizer=None,
         window_regularizer=None,
@@ -41,9 +39,6 @@ class WindowedLSTMCell(Layer):
         kernel_constraint=None,
         recurrent_constraint=None,
         bias_constraint=None,
-        # dropout=0.,
-        # recurrent_dropout=0., Not implementing dropout for now
-        # implementation=1,  the default is 2 in LSTM layer
         **kwargs
     ):
         super(WindowedLSTMCell, self).__init__(**kwargs)
@@ -74,15 +69,6 @@ class WindowedLSTMCell(Layer):
         self.recurrent_constraint = constraints.get(recurrent_constraint)
         self.bias_constraint = constraints.get(bias_constraint)
 
-        # self.dropout = min(1., max(0., dropout))
-        # self.recurrent_dropout = min(1., max(0., recurrent_dropout))
-        # self.implementation = implementation
-        # tuple(_ListWrapper) was silently dropping list content in at least 2.7.10,
-        # and fixed after 2.7.16. Converting the state_size to wrapper around
-        # NoDependency(), so that the base_layer.__setattr__ will not convert it to
-        # ListWrapper. Down the stream, self.states will be a list since it is
-        # generated from nest.map_structure with list, and tuple(list) will work
-        # properly.
         # Force batchs_size to one
         self.state_size = data_structures.NoDependency([
             self.units,  # h[t-1]
@@ -169,7 +155,7 @@ class WindowedLSTMCell(Layer):
         phi = tf.reduce_sum(phi, axis=1)
         phi = tf.reshape(phi, (1, self.char_length))
         w = tf.squeeze(tf.matmul(phi, sentence), axis=1)
-        # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
+        # in order to compute the condition of the heuristic
         last_phi = tf.reduce_sum(
             alpha * tf.math.exp(- beta * (kappa - self.char_length+1)**2),
             axis=1,)
@@ -177,7 +163,7 @@ class WindowedLSTMCell(Layer):
         phi = tf.concat((phi, last_phi), axis=-1)
         return w, kappa, phi
 
-    def call(self, inputs, states, training=None):
+    def call(self, inputs, states, training=False):
         h_tm1 = states[0]  # previous memory state
         c_tm1 = states[1]  # previous carry state
         w_tm1 = states[2]  # previous window

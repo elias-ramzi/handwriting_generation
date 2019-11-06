@@ -18,9 +18,8 @@ class HandWritingSynthesis(BaseModel):
 
     def __init__(
         self,
-        char_length=53,
-        vocab_size=60,
-        sequence_lenght=1191,
+        char_length=64,
+        vocab_size=61,
         regularizer_type='gaussian',
         reg_mean=0.,
         reg_std=0.,
@@ -51,7 +50,6 @@ class HandWritingSynthesis(BaseModel):
         )
         self.char_length = char_length
         self.vocab_size = vocab_size
-        self.sequence_lenght = sequence_lenght
         self.regularizer = self.regularization()
         self.verbose = verbose
         self.training = False
@@ -60,7 +58,7 @@ class HandWritingSynthesis(BaseModel):
 
     def _make_model(self):
 
-        strokes = Input((None, 3), batch_size=1, name='strokes')
+        strokes = Input((1, 3), batch_size=1, name='strokes')
         sentence = Input((self.char_length, self.vocab_size), batch_size=1, name='sentence')
         in_window = Input((self.vocab_size), batch_size=1, name='inWindow')
         kappa = Input(10, batch_size=1, name='kappa')
@@ -134,11 +132,6 @@ class HandWritingSynthesis(BaseModel):
         self.to_clip += ['h{}/kernel:0'.format(i) for i in range(1, 3+1)]
         self.to_clip += ['h{}/recurrent_kernel:0'.format(i) for i in range(1, 3+1)]
         self.to_clip += ['h{}/bias:0'.format(i) for i in range(1, 3+1)]
-        # self.to_clip += [
-        #     'h1/window_kernel:0',
-        #     'h1/mixture_kernel:0',
-        #     'h1/bias_mixture:0',
-        # ]
 
         return model
 
@@ -153,8 +146,9 @@ class HandWritingSynthesis(BaseModel):
         self, sentence, bias=None,
         inf_type='max',
         weights_path=None, reload=False,
-        verbose=None
+        verbose=None, seed=None
     ):
+        np.random.seed(seed)
         if not hasattr(self, 'model') or reload:
             self.make_model(weights_path=weights_path)
         if verbose:
@@ -163,7 +157,7 @@ class HandWritingSynthesis(BaseModel):
         else:
             msg = "Writing, \033[93m {length}\033[00m strokes computed"
 
-        X = tf.zeros((1, 1, 3))
+        X = np.array([[[0., 0., 1.]]])
         input_states = [
             tf.zeros((1, self.hidden_dim)),  # stateh1
             tf.zeros((1, self.hidden_dim)),  # statec1
@@ -178,21 +172,28 @@ class HandWritingSynthesis(BaseModel):
         ]
         strokes = []
         length = 1
+        windows = []
+        phis = []
+        kappas = []
 
         while length < 1300:
             try:
                 mixture_coefs, output_states =\
                     self.model([X, input_states], training=False)
-
+                windows.append(output_states[2])
                 # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
                 phi = output_states[4]
                 if tf.reduce_all(phi[0, :-1] < phi[0, -1]):
                     raise SamplingFinished
+                phis.append(phi[0, :-1])
+                kappas.append(output_states[3])
 
                 end_stroke, x, y = self._infer(mixture_coefs, inf_type=inf_type, bias=bias)
 
                 # Next inputs
                 X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
+                # as the output states in the model the window
+                # is the slice of the output (which is a sequence)  [line 96]
                 output_states[2] = output_states[2][:, 0, :]
                 input_states = output_states
                 # Our sentence written
@@ -207,4 +208,4 @@ class HandWritingSynthesis(BaseModel):
         print()
         print("Sampling finished, produced "
               "sequence of length :\033[92m {}\033[00m".format(length))
-        return np.vstack(strokes)
+        return np.vstack(strokes), windows, phis, kappas

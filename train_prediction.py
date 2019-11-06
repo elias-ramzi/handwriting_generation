@@ -3,11 +3,6 @@ import os
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
-from tensorflow.keras.callbacks import (
-    ModelCheckpoint,
-    TerminateOnNaN,
-    TensorBoard,
-)
 
 from data import DataPrediction
 from utils import plot_stroke
@@ -55,25 +50,9 @@ train_generator_kwargs = {
     'batch_size': 1,
 }
 
-callbacks = [
-    ModelCheckpoint(
-        EPOCH_MODEL_PATH,
-        save_weights_only=True,
-        period=20,
-    ),
-    TerminateOnNaN(),
-]
-if VERBOSE:
-    callbacks.append(
-        TensorBoard(
-            'models/logs',
-            histogram_freq=5,
-        )
-    )
 fit_kwargs = {
-    'steps_per_epoch': 1,
+    'steps_per_epoch': 100,
     'epochs': 10,
-    'callbacks': callbacks,
 }
 
 
@@ -94,11 +73,11 @@ input_state = tf.zeros((train_generator_kwargs['batch_size'], HIDDEN_DIM))
 input_states = [input_state] * 2 * NUM_LAYERS
 try:
     # Test for overfitting
-    # strokes, targets = next(generator)
+    strokes, targets = next(generator)
     for e in range(1, fit_kwargs['epochs'] + 1):
         train_loss = []
         for s in tqdm(range(fit_kwargs['steps_per_epoch']), desc="Epoch {}/{}".format(e, fit_kwargs['epochs'])):
-            strokes, targets = next(generator)
+            # strokes, targets = next(generator)
             loss = hwp.train([strokes, input_states], targets)
             train_loss.append(loss)
 
