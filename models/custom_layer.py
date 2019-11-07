@@ -20,7 +20,6 @@ class WindowedLSTMCell(Layer):
         self,
         units,
         window_size,
-        char_length,
         mixtures,
         activation='tanh',
         recurrent_activation='sigmoid',
@@ -44,7 +43,6 @@ class WindowedLSTMCell(Layer):
         super(WindowedLSTMCell, self).__init__(**kwargs)
         self.units = units
         self.window_size = window_size
-        self.char_length = char_length
         self.mixtures = mixtures
         self.activation = activations.get(activation)
         self.recurrent_activation = activations.get(recurrent_activation)
@@ -75,11 +73,13 @@ class WindowedLSTMCell(Layer):
             self.units,  # c[t-1]
             self.window_size,  # window[t-1]
             self.mixtures//3,  # kappa[t-1]
-            self.char_length+1,  # phi[t-1]
-            tf.TensorShape((self.char_length, self.window_size)),  # sentence
+            1,  # phi[t-1]
+            self.mixtures//3,  # alpha[t-1]
+            self.mixtures//3,  # beta[t-1]
         ])
 
         self.output_size = self.units + self.window_size
+        self.phi = []
 
     @tf_utils.shape_type_conversion
     def build(self, input_shape):
@@ -141,98 +141,51 @@ class WindowedLSTMCell(Layer):
         return c, o
 
     def _compute_window(self, sentence, h, kappa_prev):
-        h_hat = tf.matmul(h, self.mixture_kernel)
-        h_hat = K.bias_add(h_hat, self.bias_mixture)
-        alpha, beta, kappa = tf.split(h_hat, num_or_size_splits=3, axis=1)
-        alpha = tf.math.exp(alpha)
-        beta = tf.math.exp(beta)
-        kappa = kappa_prev + tf.math.exp(kappa)
+        h_hat = tf.matmul(h, self.mixture_kernel) + self.bias_mixture
+        alpha = tf.math.exp(h_hat[:, 0:10])
+        beta = tf.math.exp(h_hat[:, 0:10]) + 10**(-4)
+        kappa = kappa_prev + tf.math.exp(h_hat[:, 0:10]) / 25
         phi = []
+        char_length = sentence.shape[1]
         # indexing starts at 1 in the paper
-        U = tf.range(start=1, limit=self.char_length+1)
+        U = tf.range(start=1, limit=char_length+1)
         U = tf.dtypes.cast(tf.stack([U]*10, axis=1), dtype=float)
         phi = alpha * tf.math.exp(- beta * (kappa - U)**2)
         phi = tf.reduce_sum(phi, axis=1)
-        phi = tf.reshape(phi, (1, self.char_length))
+        phi = tf.reshape(phi, (1, char_length))
         w = tf.squeeze(tf.matmul(phi, sentence), axis=1)
-        # in order to compute the condition of the heuristic
-        last_phi = tf.reduce_sum(
-            alpha * tf.math.exp(- beta * (kappa - self.char_length+1)**2),
-            axis=1,)
-        last_phi = tf.reshape(last_phi, (1, 1))
-        phi = tf.concat((phi, last_phi), axis=-1)
-        return w, kappa, phi
+        self.phi.append(phi)
+        phi = tf.reduce_max(phi)
+        return w, kappa, tf.reshape(phi, (1, 1)), alpha, beta
 
-    def call(self, inputs, states, training=False):
+    def call(self, inputs, states, constants, training=False):
+        """
+        inputs : data points
+        states : previous states
+        constants = sentence
+        """
         h_tm1 = states[0]  # previous memory state
         c_tm1 = states[1]  # previous carry state
         w_tm1 = states[2]  # previous window
         kappa_tm1 = states[3]
-        # Hack to get pass the _standardize_args call in RNN
-        # that forces to input to be a tensor (and not a list)
-        sentence = states[-1]
+
+        sentence = constants[0]
 
         z = (
-            K.dot(inputs, self.kernel)
-            + K.dot(h_tm1, self.recurrent_kernel)
-            + K.dot(w_tm1, self.window_kernel)
+            tf.matmul(inputs, self.kernel)
+            + tf.matmul(h_tm1, self.recurrent_kernel)
+            + tf.matmul(w_tm1, self.window_kernel)
+            + self.bias
         )
-        z = K.bias_add(z, self.bias)
         z = tf.split(z, num_or_size_splits=4, axis=1)
         c, o = self._compute_carry_and_output_fused(z, c_tm1)
 
         h = o * self.activation(c)
 
-        w, kappa, phi = self._compute_window(sentence, h, kappa_tm1)
+        w, kappa, phi, alpha, beta = self._compute_window(sentence, h, kappa_tm1)
 
         output = tf.concat((h, w), axis=-1)
-        return output, [h, c, w, kappa, phi, sentence]
-
-    def get_config(self):
-        config = {
-            'units':
-                self.units,
-            'window_size':
-                self.window_size,
-            'mixtures':
-                self.mixtures,
-            'activation':
-                activations.serialize(self.activation),
-            'recurrent_activation':
-                activations.serialize(self.recurrent_activation),
-            'kernel_initializer':
-                initializers.serialize(self.kernel_initializer),
-            'recurrent_initializer':
-                initializers.serialize(self.recurrent_initializer),
-            'window_initializer':
-                initializers.serialize(self.window_initializer),
-            'bias_initializer':
-                initializers.serialize(self.bias_initializer),
-            'mixture_initializer':
-                initializers.serialize(self.mixture_initializer),
-            'bias_mixture_initializer':
-                initializers.serialize(self.bias_mixture_initializer),
-            'kernel_regularizer':
-                regularizers.serialize(self.kernel_regularizer),
-            'recurrent_regularizer':
-                regularizers.serialize(self.recurrent_regularizer),
-            'window_initializer_regularizer':
-                regularizers.serialize(self.window_initializer),
-            'bias_regularizer':
-                regularizers.serialize(self.bias_regularizer),
-            'mixture_regularizer':
-                regularizers.serialize(self.mixture_regularizer),
-            'bias_mixture_regularizer':
-                regularizers.serialize(self.bias_mixture_regularizer),
-            # 'dropout':
-            #     self.dropout,
-            # 'recurrent_dropout':
-            #     self.recurrent_dropout,
-            # 'implementation':
-            #     self.implementation
-        }
-        base_config = super(WindowedLSTMCell, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
+        return output, [h, c, w, kappa, phi, alpha, beta]
 
     def get_initial_state(self, inputs=None, batch_size=1, dtype=None):
         return [tf.zeros(shape) for shape in self.state_size]

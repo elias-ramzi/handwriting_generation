@@ -120,10 +120,6 @@ class DataSynthesis(Data):
             batch_targets = []
             for it in idx:
                 strokes, sentences = all_strokes[it], all_sentences[it]
-                sentences = np.vstack((
-                    sentences,
-                    self.char_padding*(self.char_length-sentences.shape[0])
-                ))
                 # We want (x3, x1, x2) --> (x1, x2, x3)
                 strokes = tf.gather(strokes, [1, 2, 0], axis=1)
                 batch_strokes.append(strokes[:-1, :])

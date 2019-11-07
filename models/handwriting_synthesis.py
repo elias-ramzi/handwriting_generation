@@ -14,11 +14,10 @@ class SamplingFinished(Exception):
     pass
 
 
-class HandWritingSynthesis(BaseModel):
+class HandWritingSynthesis(BaseModel, Model):
 
     def __init__(
         self,
-        char_length=64,
         vocab_size=61,
         regularizer_type='gaussian',
         reg_mean=0.,
@@ -34,7 +33,9 @@ class HandWritingSynthesis(BaseModel):
         inf_backend='threading',
         verbose=False,
     ):
-        super(HandWritingSynthesis, self).__init__(
+        Model.__init__(self)
+        BaseModel.__init__(
+            self,
             regularizer_type=regularizer_type,
             mean=reg_mean,
             std=reg_std,
@@ -48,7 +49,6 @@ class HandWritingSynthesis(BaseModel):
             inf_n_jobs=inf_n_jobs,
             inf_backend=inf_backend,
         )
-        self.char_length = char_length
         self.vocab_size = vocab_size
         self.regularizer = self.regularization()
         self.verbose = verbose
@@ -56,91 +56,102 @@ class HandWritingSynthesis(BaseModel):
         self.num_layers = 3
         self.hidden_dim = 400
 
-    def _make_model(self):
-
-        strokes = Input((1, 3), batch_size=1, name='strokes')
-        sentence = Input((self.char_length, self.vocab_size), batch_size=1, name='sentence')
-        in_window = Input((self.vocab_size), batch_size=1, name='inWindow')
-        kappa = Input(10, batch_size=1, name='kappa')
-        phi = Input(self.char_length + 1, batch_size=1, name='phi')
-        stateh1 = Input(400, batch_size=1, name='stateh1')
-        statec1 = Input(400, batch_size=1, name='statec1')
-        stateh2 = Input(400, batch_size=1, name='stateh2')
-        statec2 = Input(400, batch_size=1, name='statec2')
-        stateh3 = Input(400, batch_size=1, name='stateh3')
-        statec3 = Input(400, batch_size=1, name='statec3')
-        input_states = [
-            stateh1, statec1,
-            in_window, kappa, phi, sentence,
-            stateh2, statec2,
-            stateh3, statec3,
-        ]
-
-        wlstm1, stateh1, statec1, out_window, kappa, phi, _ = RNN(
+        self.windowedlstm = RNN(
             cell=WindowedLSTMCell(
                 units=400,
                 window_size=self.vocab_size,
-                char_length=self.char_length,
                 mixtures=30,
             ),
             return_sequences=True,
             return_state=True,
             name='h1'
-        )(
-            inputs=strokes,
-            initial_state=input_states[0:6]
         )
-        lstm1 = wlstm1[:, :, :400]
-        out_window = wlstm1[:, :, 400:]
 
-        _input2 = Concatenate(name='skip1')([strokes, out_window, lstm1])
-        lstm2, stateh2, statec2 = LSTM(
+        self.lstm2 = LSTM(
             400,
             return_sequences=True,
             return_state=True,
-            kernel_regularizer=self.regularizer,
-            recurrent_regularizer=self.regularizer,
             name='h2',
-        )(_input2, initial_state=input_states[6:8])
+        )
 
-        _input3 = Concatenate(name='Skip2')([strokes, out_window, lstm2])
-        lstm3, stateh3, statec3 = LSTM(
+        self.lstm3 = LSTM(
             400,
             return_sequences=True,
             return_state=True,
-            kernel_regularizer=self.regularizer,
-            recurrent_regularizer=self.regularizer,
             name='h3',
-            )(_input3, initial_state=input_states[8:])
+            )
 
-        lstm = Concatenate(name='Skip3')([lstm1, lstm2, lstm3])
-        y_hat = Dense(121, name='MixtureCoef')(lstm)
-        mixture_coefs = self._mixture_coefs(y_hat)
-
-        output_states = [
-            stateh1, statec1,
-            out_window, kappa, phi, sentence,
-            stateh2, statec2,
-            stateh3, statec3
-        ]
-        model = Model(
-            inputs=[strokes, input_states],
-            outputs=[mixture_coefs, output_states]
-        )
+        self.mixture = Dense(121, name='MixtureCoef')
 
         # Used for gradient cliping the lstm's
         self.to_clip += ['h{}/kernel:0'.format(i) for i in range(1, 3+1)]
         self.to_clip += ['h{}/recurrent_kernel:0'.format(i) for i in range(1, 3+1)]
         self.to_clip += ['h{}/bias:0'.format(i) for i in range(1, 3+1)]
 
-        return model
+        self.optimizer = tf.keras.optimizers.RMSprop(
+            lr=self.lr,
+            rho=self.rho,
+            momentum=self.momentum,
+            epsilon=self.epsilon,
+            centered=self.centered,
+        )
 
-    def make_model(self, load_weights=None):
-        self.model = self._make_model()
-        if load_weights is not None:
-            self.model.load_weights(load_weights)
-        if self.verbose:
-            self.model.summary()
+    def call(self, strokes, sentence, states):
+        wlstm1, stateh1, statec1, out_window, kappa, phi, alpha, beta = self.windowedlstm(
+            inputs=strokes,
+            initial_state=states[0:2] + states[-5:],
+            constants=sentence,
+        )
+        lstm1 = wlstm1[:, :, :400]
+        out_window = wlstm1[:, :, 400:]
+
+        _input2 = tf.concat([strokes, out_window, lstm1], axis=-1, name='skip1')
+        lstm2, stateh2, statec2 = self.lstm2(_input2, initial_state=states[2:4])
+
+        _input3 = tf.concat([strokes, out_window, lstm2], axis=-1, name='Skip2')
+        lstm3, stateh3, statec3 = self.lstm3(_input3, initial_state=states[4:6])
+
+        lstm = tf.concat([lstm1, lstm2, lstm3], axis=-1, name='Skip3')
+        y_hat = self.mixture(lstm)
+        mixture_coefs = self._mixture_coefs(y_hat)
+
+        output_states = [
+            stateh1, statec1,
+            stateh2, statec2,
+            stateh3, statec3,
+            out_window, kappa, phi, alpha, beta,
+        ]
+
+        return mixture_coefs, output_states
+
+    def train(self, strokes, sentence, states, targets):
+        with tf.GradientTape() as tape:
+            outputs = self(strokes, sentence, states)
+            predictions, _ = outputs
+            targets = tf.dtypes.cast(targets, dtype=float)
+            loss = self.loss_function(targets, predictions)
+
+            gradients = tape.gradient(loss, self.trainable_variables)
+
+        # Clips gradient for output Dense layer
+        gradients[-1] = tf.clip_by_value(gradients[-1], -100.0, 100.0)
+        gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
+
+        # Clips gradient for LSTM layers
+        for i, grad in enumerate(gradients):
+            name = self.trainable_variables[i].name
+            if name in self.to_clip:
+                gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
+
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        return loss
+
+    def validation(self, strokes, sentence, states, targets):
+        outputs = self(strokes, sentence, states)
+        predictions, _ = outputs
+        targets = tf.dtypes.cast(targets, dtype=float)
+        loss = self.loss_function(targets, predictions)
+        return loss
 
     def infer(
         self, sentence, bias=None,
@@ -149,8 +160,6 @@ class HandWritingSynthesis(BaseModel):
         verbose=None, seed=None
     ):
         np.random.seed(seed)
-        if not hasattr(self, 'model') or reload:
-            self.make_model(weights_path=weights_path)
         if verbose:
             msg = ("Writing : \033[92m {sentence}\033[00m,"
                    " \033[93m {length}\033[00m strokes computed")
@@ -161,32 +170,44 @@ class HandWritingSynthesis(BaseModel):
         input_states = [
             tf.zeros((1, self.hidden_dim)),  # stateh1
             tf.zeros((1, self.hidden_dim)),  # statec1
-            tf.zeros((1, self.vocab_size)),  # in_window
-            tf.zeros((1, 10)),  # kappa
-            tf.zeros((1, self.char_length + 1)),  # phi
-            sentence,  # sentence
             tf.zeros((1, self.hidden_dim)),  # stateh2
             tf.zeros((1, self.hidden_dim)),  # statec2
             tf.zeros((1, self.hidden_dim)),  # stateh3
             tf.zeros((1, self.hidden_dim)),  # statec3
+            tf.zeros((1, self.vocab_size)),  # in_window
+            tf.zeros((1, 10)),  # kappa
+            tf.zeros((1, 1)),  # phi
+            tf.zeros((1, 10)),  # alpha
+            tf.zeros((1, 10)),  # beta
         ]
         strokes = []
         length = 1
         windows = []
         phis = []
         kappas = []
+        alphas = []
+        betas = []
 
         while length < 1300:
             try:
                 mixture_coefs, output_states =\
-                    self.model([X, input_states], training=False)
-                windows.append(output_states[2])
+                    self(X, sentence, input_states, training=False)
+
                 # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
-                phi = output_states[4]
-                if tf.reduce_all(phi[0, :-1] < phi[0, -1]):
+                kappa = output_states[-4]
+                phi = output_states[-3]
+                alpha = output_states[-2]
+                beta = output_states[-1]
+                last_phi = tf.reduce_sum(
+                    alpha * tf.math.exp(- beta * (kappa - sentence.shape[1]+1)**2),
+                    axis=1,)
+                if phi < last_phi:
                     raise SamplingFinished
-                phis.append(phi[0, :-1])
-                kappas.append(output_states[3])
+                phis.append(phi)
+                kappas.append(kappa)
+                windows.append(output_states[-5])
+                alphas.append(alpha)
+                betas.append(beta)
 
                 end_stroke, x, y = self._infer(mixture_coefs, inf_type=inf_type, bias=bias)
 
@@ -194,7 +215,7 @@ class HandWritingSynthesis(BaseModel):
                 X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
                 # as the output states in the model the window
                 # is the slice of the output (which is a sequence)  [line 96]
-                output_states[2] = output_states[2][:, 0, :]
+                output_states[-5] = output_states[-5][:, 0, :]
                 input_states = output_states
                 # Our sentence written
                 strokes.append((end_stroke, x, y))
@@ -208,4 +229,4 @@ class HandWritingSynthesis(BaseModel):
         print()
         print("Sampling finished, produced "
               "sequence of length :\033[92m {}\033[00m".format(length))
-        return np.vstack(strokes), windows, phis, kappas
+        return np.vstack(strokes), windows, phis, kappas, alphas, betas
