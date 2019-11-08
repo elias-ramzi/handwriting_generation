@@ -140,11 +140,11 @@ class WindowedLSTMCell(Layer):
         o = self.recurrent_activation(z3)
         return c, o
 
-    def _compute_window(self, sentence, h, kappa_prev):
+    def _compute_window(self, sentence, h, kappa_prev, training):
         h_hat = tf.matmul(h, self.mixture_kernel) + self.bias_mixture
         alpha = tf.math.exp(h_hat[:, 0:10])
-        beta = tf.math.exp(h_hat[:, 0:10]) + 10**(-4)
-        kappa = kappa_prev + tf.math.exp(h_hat[:, 0:10]) / 25
+        beta = tf.math.exp(h_hat[:, 10:20]) + 10**(-4)
+        kappa = kappa_prev + tf.math.exp(h_hat[:, 20:30])
         phi = []
         char_length = sentence.shape[1]
         # indexing starts at 1 in the paper
@@ -154,7 +154,8 @@ class WindowedLSTMCell(Layer):
         phi = tf.reduce_sum(phi, axis=1)
         phi = tf.reshape(phi, (1, char_length))
         w = tf.squeeze(tf.matmul(phi, sentence), axis=1)
-        self.phi.append(phi)
+        if not training:
+            self.phi.append(phi)
         phi = tf.reduce_max(phi)
         return w, kappa, tf.reshape(phi, (1, 1)), alpha, beta
 
@@ -182,7 +183,7 @@ class WindowedLSTMCell(Layer):
 
         h = o * self.activation(c)
 
-        w, kappa, phi, alpha, beta = self._compute_window(sentence, h, kappa_tm1)
+        w, kappa, phi, alpha, beta = self._compute_window(sentence, h, kappa_tm1, training)
 
         output = tf.concat((h, w), axis=-1)
         return output, [h, c, w, kappa, phi, alpha, beta]

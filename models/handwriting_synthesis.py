@@ -1,10 +1,7 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import (
-    Input, LSTM, RNN,
-    Dense, Concatenate,
-)
+from tensorflow.keras.layers import LSTM, RNN, Dense
 
 from models.base_model import BaseModel
 from models.custom_layer import WindowedLSTMCell
@@ -96,11 +93,12 @@ class HandWritingSynthesis(BaseModel, Model):
             centered=self.centered,
         )
 
-    def call(self, strokes, sentence, states):
+    def call(self, strokes, sentence, states, training=None):
         wlstm1, stateh1, statec1, out_window, kappa, phi, alpha, beta = self.windowedlstm(
             inputs=strokes,
             initial_state=states[0:2] + states[-5:],
             constants=sentence,
+            training=training
         )
         lstm1 = wlstm1[:, :, :400]
         out_window = wlstm1[:, :, 400:]
@@ -159,6 +157,7 @@ class HandWritingSynthesis(BaseModel, Model):
         weights_path=None, reload=False,
         verbose=None, seed=None
     ):
+        self.windowedlstm.cell.phi = []
         np.random.seed(seed)
         if verbose:
             msg = ("Writing : \033[92m {sentence}\033[00m,"
@@ -201,7 +200,7 @@ class HandWritingSynthesis(BaseModel, Model):
                 last_phi = tf.reduce_sum(
                     alpha * tf.math.exp(- beta * (kappa - sentence.shape[1]+1)**2),
                     axis=1,)
-                if phi < last_phi:
+                if phi <= last_phi:
                     raise SamplingFinished
                 phis.append(phi)
                 kappas.append(kappa)

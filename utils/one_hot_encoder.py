@@ -27,7 +27,11 @@ class OneHotEncoder(BaseEstimator, TransformerMixin):
         for text in X:
             encoded = np.zeros((len(text), len(self.vocab)))
             for i, letter in enumerate(text):
-                encoded[i][self.vocab[letter]-1] = 1
+                try:
+                    encoded[i][self.vocab[letter]-1] = 1
+                except KeyError:
+                    # Special character representing the unkwnon
+                    encoded[i][self.vocab["#"]-1] = 1
             embeded.append(encoded)
 
         return embeded

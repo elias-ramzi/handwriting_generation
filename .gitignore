@@ -10,5 +10,6 @@ tmp/
 .venv/
 
 [Models]
-model*.h5
+models/trained/test/*.h5
+models/history/test/*.json
 models/logs/train/*

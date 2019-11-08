@@ -41,3 +41,10 @@ def plot_stroke(stroke, save_name=None):
             print("Error building image!: " + save_name)
 
     pyplot.close()
+
+
+def json_default(x):
+    if isinstance(x, numpy.float32):
+        return float(x)
+    else:
+        raise TypeError

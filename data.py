@@ -14,28 +14,32 @@ class Data(ABC):
         path_to_data='data/strokes-py3.npy',
         path_to_sentences='data/sentences.txt',
         clean_text=True,
-        allow_multiple=False,
+        train_split=0.8,
     ):
         self.path_to_data = path_to_data
         self.path_to_sentences = path_to_sentences
         self.clean_text = clean_text
         self.encoder = OneHotEncoder()
-        # padd with one, to have the pen lifted
-        self.padding = [[1, 0, 0]]
+        self.train_split = train_split
 
     @property
     def strokes(self):
         if not hasattr(self, '_strokes'):
             strokes = np.load(self.path_to_data, allow_pickle=True)
-            self._max_length = max(map(len, strokes))
-            self._strokes = strokes
+            self.num_val = int(len(strokes) * self.train_split)
+            self._strokes = strokes[:self.num_val].copy()
+            self._validation = strokes[self.num_val:].copy()
+            strokes = np.vstack(self._strokes.copy())
+            strokes = strokes[:, 1:]
+            self.mean1, self.mean2 = np.mean(strokes, axis=0)
+            self.std1, self.std2 = np.std(strokes, axis=0)
         return self._strokes.copy()
 
     @property
-    def max_length(self):
-        if not hasattr(self, '_max_length'):
+    def validation_strokes(self):
+        if not hasattr(self, '_validation'):
             _ = self.strokes
-        return self._max_length
+        return self._strokes.copy()
 
     def prepare_text(self, text):
         _ = self.sentences
@@ -58,16 +62,18 @@ class Data(ABC):
                 texts = re.sub('[^.,a-zA-Z!?\-\'" \n]', '#', texts)
 
             texts = texts.split('\n')
-            self._sentences = self.encoder.fit_transform(texts)
-            self._char_length = max(map(len, self._sentences))
-            self.char_padding = [[0] * len(self._sentences[0][0])]
+            self.num_val = int(len(texts) * self.train_split)
+            sentence = texts[:self.num_val]
+            validation_sentence = texts[:self.num_val]
+            self._sentences = self.encoder.fit_transform(sentence)
+            self._validation_sentences = self.encoder.transform(validation_sentence)
         return self._sentences.copy()
 
     @property
-    def char_length(self):
-        if not hasattr(self, '_char_length'):
+    def validation_sentences(self):
+        if not hasattr(self, '_validation_sentences'):
             _ = self.sentences
-        return self._char_length
+        return self._validation_sentences.copy()
 
     @abstractmethod
     def batch_generator(self, sequence_lenght, batch_size=10):
@@ -79,9 +85,13 @@ class DataPrediction(Data):
     def __init__(self, path_to_data='data/strokes-py3.npy'):
         super(DataPrediction, self).__init__(path_to_data=path_to_data)
 
-    def batch_generator(self, sequence_lenght, batch_size=10):
+    def batch_generator(self, sequence_lenght, batch_size=10, data_type='train'):
+        assert data_type in ['train', 'validation']
         # We want (x3, x1, x2) --> (x1, x2, x3)
-        all_strokes = tf.gather(np.vstack(self.strokes), [1, 2, 0], axis=1)
+        if data_type == 'train':
+            all_strokes = tf.gather(np.vstack(self.strokes), [1, 2, 0], axis=1)
+        elif data_type == 'validation':
+            all_strokes = tf.gather(np.vstack(self.validation_strokes), [1, 2, 0], axis=1)
         while True:
             batch_strokes = []
             batch_targets = []
@@ -100,16 +110,23 @@ class DataSynthesis(Data):
         path_to_sentences='data/sentences.txt',
         clean_text=True,
         path_to_data='data/strokes-py3.npy',
+        train_split=0.8,
     ):
         super(DataSynthesis, self).__init__(
             path_to_data=path_to_data,
             path_to_sentences=path_to_sentences,
             clean_text=clean_text,
+            train_split=train_split,
         )
 
-    def batch_generator(self, batch_size=1, shuffle=True):
-        all_strokes = self.strokes
-        all_sentences = self.sentences
+    def batch_generator(self, batch_size=1, shuffle=True, data_type='train'):
+        assert data_type in ['train', 'validation']
+        if data_type == 'train':
+            all_strokes = self.strokes
+            all_sentences = self.sentences
+        elif data_type == 'validation':
+            all_strokes = self.validation_strokes
+            all_sentences = self.validation_sentences
         idx = np.arange(0, len(all_sentences))
         while True:
             if shuffle:
@@ -120,6 +137,8 @@ class DataSynthesis(Data):
             batch_targets = []
             for it in idx:
                 strokes, sentences = all_strokes[it], all_sentences[it]
+                strokes[:, 1] = (strokes[:, 1] - self.mean1) / self.std1
+                strokes[:, 2] = (strokes[:, 2] - self.mean2) / self.std2
                 # We want (x3, x1, x2) --> (x1, x2, x3)
                 strokes = tf.gather(strokes, [1, 2, 0], axis=1)
                 batch_strokes.append(strokes[:-1, :])
