@@ -7,10 +7,6 @@ from models.base_model import BaseModel
 from models.custom_layer import WindowedLSTMCell
 
 
-class SamplingFinished(Exception):
-    pass
-
-
 class HandWritingSynthesis(BaseModel, Model):
 
     def __init__(
@@ -80,11 +76,6 @@ class HandWritingSynthesis(BaseModel, Model):
 
         self.mixture = Dense(121, name='MixtureCoef')
 
-        # Used for gradient cliping the lstm's
-        self.to_clip += ['h{}/kernel:0'.format(i) for i in range(1, 3+1)]
-        self.to_clip += ['h{}/recurrent_kernel:0'.format(i) for i in range(1, 3+1)]
-        self.to_clip += ['h{}/bias:0'.format(i) for i in range(1, 3+1)]
-
         self.optimizer = tf.keras.optimizers.RMSprop(
             lr=self.lr,
             rho=self.rho,
@@ -136,12 +127,11 @@ class HandWritingSynthesis(BaseModel, Model):
         gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
 
         # Clips gradient for LSTM layers
-        for i, grad in enumerate(gradients):
-            name = self.trainable_variables[i].name
-            if name in self.to_clip:
-                gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
+        for i, grad in enumerate(gradients[:-2]):
+            gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
 
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+        self.windowedlstm.cell.phi = []
         return loss
 
     def validation(self, strokes, sentence, states, targets):
@@ -182,50 +172,45 @@ class HandWritingSynthesis(BaseModel, Model):
         strokes = []
         length = 1
         windows = []
-        phis = []
         kappas = []
         alphas = []
         betas = []
 
         while length < 1300:
-            try:
-                mixture_coefs, output_states =\
-                    self(X, sentence, input_states, training=False)
+            mixture_coefs, output_states =\
+                self(X, sentence, input_states, training=False)
 
-                # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
-                kappa = output_states[-4]
-                phi = output_states[-3]
-                alpha = output_states[-2]
-                beta = output_states[-1]
-                last_phi = tf.reduce_sum(
-                    alpha * tf.math.exp(- beta * (kappa - sentence.shape[1]+1)**2),
-                    axis=1,)
-                if phi <= last_phi:
-                    raise SamplingFinished
-                phis.append(phi)
-                kappas.append(kappa)
-                windows.append(output_states[-5])
-                alphas.append(alpha)
-                betas.append(beta)
-
-                end_stroke, x, y = self._infer(mixture_coefs, inf_type=inf_type, bias=bias)
-
-                # Next inputs
-                X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
-                # as the output states in the model the window
-                # is the slice of the output (which is a sequence)  [line 96]
-                output_states[-5] = output_states[-5][:, 0, :]
-                input_states = output_states
-                # Our sentence written
-                strokes.append((end_stroke, x, y))
-
-                print(msg.format(sentence=verbose, length=length), end='\r')
-                length += 1
-
-            except SamplingFinished:
+            # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
+            kappa = output_states[-4]
+            phi = output_states[-3]
+            alpha = output_states[-2]
+            beta = output_states[-1]
+            last_phi = tf.reduce_sum(
+                alpha * tf.math.exp(- beta * (kappa - sentence.shape[1]+1)**2),
+                axis=1,)
+            if phi <= last_phi:
                 break
+            kappas.append(kappa)
+            windows.append(output_states[-5])
+            alphas.append(alpha)
+            betas.append(beta)
+
+            end_stroke, x, y = self._infer(mixture_coefs, inf_type=inf_type, bias=bias)
+
+            # Next inputs
+            X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
+            # as the output states in the model the window
+            # is the slice of the output (which is a sequence)  [line 96]
+            output_states[-5] = output_states[-5][:, 0, :]
+            input_states = output_states
+            # Our sentence written
+            strokes.append((end_stroke, x, y))
+
+            print(msg.format(sentence=verbose, length=length), end='\r')
+            length += 1
 
         print()
         print("Sampling finished, produced "
               "sequence of length :\033[92m {}\033[00m".format(length))
+        phis = self.windowedlstm.cell.phi
         return np.vstack(strokes), windows, phis, kappas, alphas, betas

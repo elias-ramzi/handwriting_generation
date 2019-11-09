@@ -15,6 +15,8 @@ class OneHotEncoder(BaseEstimator, TransformerMixin):
         vocab = set()
         for x in X:
             vocab.update(set(x))
+        vocab = list(vocab)
+        vocab = sorted(vocab)
         self.vocab = dict(zip(vocab, range(1, len(vocab)+1)))
         self.inv_vocab = dict(zip(range(1, len(vocab)+1), vocab))
         return self

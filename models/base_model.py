@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 
 import numpy as np
 import tensorflow as tf
@@ -103,6 +103,8 @@ class BaseModel(ABC):
 
     @staticmethod
     def loss_function(y_true, y_pred):
+        if isinstance(y_pred, list):
+            y_pred = y_pred[0]
         x1 = y_true[:, :, 0]
         x2 = y_true[:, :, 1]
         x3 = y_true[:, :, 2]
@@ -160,13 +162,10 @@ class BaseModel(ABC):
         gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
 
         # Clips gradient for LSTM layers
-        for i, grad in enumerate(gradients):
-            name = self.model.trainable_variables[i].name
-            if name in self.to_clip:
-                gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
+        for i, grad in enumerate(gradients[:-2]):
+            gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
 
         optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-
         return loss
 
     def _infer(self, mixture_coefs, inf_type='max', bias=None):
