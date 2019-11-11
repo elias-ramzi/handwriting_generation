@@ -1,10 +1,12 @@
 import os
+import time
 import json
 
 import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 from tqdm import tqdm
+from tensorflow.keras.callbacks import TensorBoard
 
 from data import DataSynthesis
 from utils import plot_stroke, json_default
@@ -14,6 +16,8 @@ from models.handwriting_synthesis import HandWritingSynthesis
 # ''''''''''''''''''''''''''' CONFIG '''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
+Run_ID = int(time.time())
 
 
 MODEL_PATH = 'models/trained/test/model_synthesis_overfit.h5'
@@ -55,7 +59,7 @@ validation_generator_kwargs = {
     'shuffle': True,
 }
 
-EPOCHS = 5
+EPOCHS = 1
 STEPS_PER_EPOCH = 1
 VAL_STEPS = 1
 MODEL_CHECKPOINT = 5
@@ -73,6 +77,9 @@ WINDOW_SIZE = len(D.sentences[0][0])
 
 model_kwargs['vocab_size'] = WINDOW_SIZE
 hws = HandWritingSynthesis(**model_kwargs)
+hws.make_model()
+tensorboard_cb = TensorBoard(log_dir='logs/')
+tensorboard_cb.set_model(hws.model)
 
 nan = False
 generator = D.batch_generator(

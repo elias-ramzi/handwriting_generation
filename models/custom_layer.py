@@ -148,7 +148,7 @@ class WindowedLSTMCell(Layer):
         beta = h_hat[:, 10:20]
         kappa = kappa_prev + h_hat[:, 20:30]
         phi = []
-        char_length = sentence.shape[1]
+        char_length = tf.shape(sentence)[1]
         # indexing starts at 1 in the paper
         U = tf.range(start=1, limit=char_length+1)
         U = tf.dtypes.cast(tf.stack([U]*10, axis=1), dtype=float)

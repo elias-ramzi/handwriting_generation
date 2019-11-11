@@ -1,13 +1,13 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import LSTM, RNN, Dense
+from tensorflow.keras.layers import LSTM, RNN, Dense, Concatenate, Input
 
 from models.base_model import BaseModel
 from models.custom_layer import WindowedLSTMCell
 
 
-class HandWritingSynthesis(BaseModel, Model):
+class HandWritingSynthesis(BaseModel):
 
     def __init__(
         self,
@@ -22,11 +22,8 @@ class HandWritingSynthesis(BaseModel, Model):
         epsilon=0.0001,
         centered=True,
         inf_type='sum',
-        inf_n_jobs=-2,
-        inf_backend='threading',
         verbose=False,
     ):
-        Model.__init__(self)
         BaseModel.__init__(
             self,
             regularizer_type=regularizer_type,
@@ -39,8 +36,6 @@ class HandWritingSynthesis(BaseModel, Model):
             epsilon=epsilon,
             centered=centered,
             inf_type=inf_type,
-            inf_n_jobs=inf_n_jobs,
-            inf_backend=inf_backend,
         )
         self.vocab_size = vocab_size
         self.regularizer = self.regularization()
@@ -48,33 +43,6 @@ class HandWritingSynthesis(BaseModel, Model):
         self.training = False
         self.num_layers = 3
         self.hidden_dim = 400
-
-        self.windowedlstm = RNN(
-            cell=WindowedLSTMCell(
-                units=400,
-                window_size=self.vocab_size,
-                mixtures=30,
-            ),
-            return_sequences=True,
-            return_state=True,
-            name='h1'
-        )
-
-        self.lstm2 = LSTM(
-            400,
-            return_sequences=True,
-            return_state=True,
-            name='h2',
-        )
-
-        self.lstm3 = LSTM(
-            400,
-            return_sequences=True,
-            return_state=True,
-            name='h3',
-            )
-
-        self.mixture = Dense(121, name='MixtureCoef')
 
         self.optimizer = tf.keras.optimizers.RMSprop(
             lr=self.lr,
@@ -84,25 +52,83 @@ class HandWritingSynthesis(BaseModel, Model):
             centered=self.centered,
         )
 
-    def call(self, strokes, sentence, states, training=None):
-        wlstm1, stateh1, statec1, out_window, kappa, phi, alpha, beta = self.windowedlstm(
+    def __call__(self, strokes, sentence, states):
+        if not hasattr(self, 'model'):
+            self.make_model()
+        self.model(strokes, sentence, states)
+
+    def make_model(self):
+        strokes = Input((None, 3))
+        sentence = Input((None, self.vocab_size))
+        stateh1 = Input((400,))
+        statec1 = Input((400,))
+        stateh2 = Input((400,))
+        statec2 = Input((400,))
+        stateh3 = Input((400,))
+        statec3 = Input((400,))
+        in_window = Input((self.vocab_size,))
+        kappa_prev = Input((10,))
+        phi_prev = Input((1,))
+        alpha_prev = Input((10,))
+        beta_prev = Input((10,))
+
+        states = [
+            stateh1, statec1,
+            stateh2, statec2,
+            stateh3, statec3,
+            in_window, kappa_prev, phi_prev, alpha_prev, beta_prev,
+        ]
+
+        wlstm1, stateh1, statec1, out_window, kappa, phi, alpha, beta = RNN(
+            cell=WindowedLSTMCell(
+                units=400,
+                window_size=self.vocab_size,
+                mixtures=30,
+            ),
+            return_sequences=True,
+            return_state=True,
+            name='h1'
+        )(
             inputs=strokes,
             initial_state=states[0:2] + states[-5:],
             constants=sentence,
-            training=training
         )
         lstm1 = wlstm1[:, :, :400]
         out_window = wlstm1[:, :, 400:]
 
-        _input2 = tf.concat([strokes, out_window, lstm1], axis=-1, name='skip1')
-        lstm2, stateh2, statec2 = self.lstm2(_input2, initial_state=states[2:4])
+        _input2 = Concatenate(axis=-1, name='skip1')([strokes, out_window, lstm1])
+        lstm2, stateh2, statec2 = LSTM(
+            400,
+            return_sequences=True,
+            return_state=True,
+            name='h2',
+        )(_input2, initial_state=states[2:4])
 
-        _input3 = tf.concat([strokes, out_window, lstm2], axis=-1, name='Skip2')
-        lstm3, stateh3, statec3 = self.lstm3(_input3, initial_state=states[4:6])
+        _input3 = Concatenate(axis=-1, name='Skip2')([strokes, out_window, lstm2])
+        lstm3, stateh3, statec3 = LSTM(
+            400,
+            return_sequences=True,
+            return_state=True,
+            name='h3',
+        )(_input3, initial_state=states[4:6])
 
-        lstm = tf.concat([lstm1, lstm2, lstm3], axis=-1, name='Skip3')
-        y_hat = self.mixture(lstm)
-        mixture_coefs = self._mixture_coefs(y_hat)
+        lstm = Concatenate(axis=-1, name='Skip3')([lstm1, lstm2, lstm3])
+        y_hat = Dense(121, name='MixtureCoef')(lstm)
+
+        e = tf.nn.sigmoid(-y_hat[:, :, 0: 1])
+        pi, mu1, mu2, sigma1, sigma2, rho = tf.split(
+            y_hat[:, :, 1:],
+            num_or_size_splits=6,
+            axis=2,
+        )
+        pi = tf.nn.softmax(pi)
+        sigma1 = tf.math.exp(sigma1) + 10**(-4)
+        sigma2 = tf.math.exp(sigma2) + 10**(-4)
+        rho = tf.nn.tanh(rho)
+        mixture_coefs = Concatenate(name='output', axis=-1)([
+            e, pi, mu1, mu2,
+            sigma1, sigma2, rho,
+            ])
 
         output_states = [
             stateh1, statec1,
@@ -111,7 +137,9 @@ class HandWritingSynthesis(BaseModel, Model):
             out_window, kappa, phi, alpha, beta,
         ]
 
-        return mixture_coefs, output_states
+        model = Model(inputs=[strokes, sentence, states], outputs=[mixture_coefs, output_states])
+        model.summary()
+        self.model = model
 
     def train(self, strokes, sentence, states, targets):
         with tf.GradientTape() as tape:
