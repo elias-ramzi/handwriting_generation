@@ -1,11 +1,15 @@
 import os
+import json
+import time
 
 import numpy as np
+import matplotlib.pyplot as plt
 import tensorflow as tf
+from tensorflow.keras.callbacks import TensorBoard
 from tqdm import tqdm
 
 from data import DataPrediction
-from utils import plot_stroke
+from utils import plot_stroke, json_default
 from models import HandWritingPrediction
 
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -13,29 +17,27 @@ from models import HandWritingPrediction
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+RUN_ID = int(time.time())
 
-MODEL_PATH = 'models/trained/model_stacked_overfit.h5'
-EPOCH_MODEL_PATH = 'models/trained/model_overfit_{epoch}.h5'
 LOAD_PREVIOUS = None
-SEQUENCE_LENGTH = 700
+
+MODEL_PATH = 'models/trained/test/model_generation_{}.h5'.format(RUN_ID)
+EPOCH_MODEL_PATH = 'models/trained/test/model_generation_{}_{}.h5'.format(RUN_ID, "{}")
+HISTORY_PATH = 'models/history/test/history_generation_{}.json'.format(RUN_ID)
+LOG_PATH = 'models/logs/'
 
 DATA_PATH = 'data/strokes-py3.npy'
 
 VERBOSE = False
 
 model_kwargs = {
-    'train_seq_length': SEQUENCE_LENGTH,
     'lstm': 'stacked',
-    'regularizer_type': 'l2',
-    'reg_mean': 0.,
-    'reg_std': 0.,
-    'reg_l2': 0.,
     'lr': .0001,
     'rho': .95,
     'momentum': .9,
     'epsilon': .0001,
     'centered': True,
-    'inf_type': 'max',
+    'verbose': VERBOSE,
 }
 
 HIDDEN_DIM = 900 if model_kwargs['lstm'] == 'single' else 400
@@ -43,17 +45,22 @@ NUM_LAYERS = 1 if model_kwargs['lstm'] == 'single' else 3
 
 data_kwargs = {
     'path_to_data': DATA_PATH,
+    'train_split': 0.9,
+    'scale': True,
 }
 
 train_generator_kwargs = {
-    'sequence_lenght': SEQUENCE_LENGTH,
-    'batch_size': 1,
+    'shuffle': False,
 }
 
-fit_kwargs = {
-    'steps_per_epoch': 100,
-    'epochs': 10,
+validation_generator_kwargs = {
+    'shuffle': True,
 }
+
+EPOCHS = 100
+STEPS_PER_EPOCH = 10
+VAL_STEPS = 0
+MODEL_CHECKPOINT = 1
 
 
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
@@ -61,23 +68,42 @@ fit_kwargs = {
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 D = DataPrediction(**data_kwargs)
+
 hwp = HandWritingPrediction(**model_kwargs)
 hwp.make_model(load_weights=LOAD_PREVIOUS)
+tensorboard_cb = TensorBoard(log_dir=LOG_PATH)
+tensorboard_cb.set_model(hwp.model)
 
 nan = False
 generator = D.batch_generator(
     **train_generator_kwargs,
 )
+validation_generator = D.batch_generator(
+    **validation_generator_kwargs,
+)
 
-input_state = tf.zeros((train_generator_kwargs['batch_size'], HIDDEN_DIM))
+input_state = tf.zeros((1, HIDDEN_DIM))
 input_states = [input_state] * 2 * NUM_LAYERS
+
+
+history = {
+    'train_loss': [],
+    'validation_loss': [],
+}
+
+print()
+print("Running HandWritingPrediction train with ID \033[92m {}\033[00m".format(RUN_ID))
+print()
+
+
 try:
     # Test for overfitting
     strokes, targets = next(generator)
-    for e in range(1, fit_kwargs['epochs'] + 1):
+    for e in range(1, EPOCHS + 1):
         train_loss = []
-        for s in tqdm(range(fit_kwargs['steps_per_epoch']), desc="Epoch {}/{}".format(e, fit_kwargs['epochs'])):
-            # strokes, targets = next(generator)
+        val_loss = []
+        for s in tqdm(range(1, STEPS_PER_EPOCH+1), desc="Epoch {}/{}".format(e, EPOCHS)):
+            # strokes, sentence, targets = next(generator)
             loss = hwp.train([strokes, input_states], targets)
             train_loss.append(loss)
 
@@ -86,11 +112,19 @@ try:
                 print('exiting train @epoch : {}'.format(e))
                 break
 
-        mean_loss = np.mean(train_loss)
-        print("Epoch {:03d}: Loss: {:.3f}".format(e, mean_loss))
+        for _ in range(VAL_STEPS):
+            vstrokes, vtargets = next(validation_generator)
+            val_loss.append(hwp.validation([vstrokes, input_states], vtargets))
 
-        if e % 1 == 0:
-            hwp.model.save_weights('models/trained/model_overfit_{}.h5'.format(e))
+        mean_loss = np.mean(train_loss)
+        mean_val_loss = np.mean(val_loss)
+        history['train_loss'].append(mean_loss)
+        history['validation_loss'].append(mean_val_loss)
+        print("Epoch {:03d}: Loss:\033[93m {:.3f}\033[00m / Validation loss : {:.3f}"
+              .format(e, mean_loss, mean_val_loss))
+
+        if e % MODEL_CHECKPOINT == 0:
+            hwp.model.save_weights(EPOCH_MODEL_PATH.format(e))
 
         if nan:
             break
@@ -102,12 +136,22 @@ if not nan:
     hwp.model.save_weights(MODEL_PATH)
 
 
+with open(HISTORY_PATH, 'w') as f:
+    json.dump(history, f, default=json_default)
+
+
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 # '''''''''''''''''''''''''''''''EVALUATE'''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
-
 strokes1 = hwp.infer(seed=23)
+strokes1 = D.scale_back(strokes1)
+
+plt.figure(figsize=(10, 5))
+plt.title('Learning curv')
+plt.plot(history['train_loss'], label='Training learn curv')
+plt.plot(history['validation_loss'], color='r', label='Validation learn curv')
+plt.show()
+
 plot_stroke(strokes1)
-# strokes2 = hwp.infer(700, 'sum')
-# plot_stroke(strokes2)
+
 import ipdb; ipdb.set_trace()

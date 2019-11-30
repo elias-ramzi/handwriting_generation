@@ -12,33 +12,14 @@ class HandWritingSynthesis(BaseModel):
     def __init__(
         self,
         vocab_size=61,
-        regularizer_type='gaussian',
-        reg_mean=0.,
-        reg_std=0.,
-        reg_l2=0.,
         lr=0.0001,
         rho=0.95,
         momentum=0.9,
         epsilon=0.0001,
         centered=True,
-        inf_type='sum',
         verbose=False,
     ):
-        BaseModel.__init__(
-            self,
-            regularizer_type=regularizer_type,
-            mean=reg_mean,
-            std=reg_std,
-            l2=reg_l2,
-            lr=lr,
-            rho=rho,
-            momentum=momentum,
-            epsilon=epsilon,
-            centered=centered,
-            inf_type=inf_type,
-        )
         self.vocab_size = vocab_size
-        self.regularizer = self.regularization()
         self.verbose = verbose
         self.training = False
         self.num_layers = 3
@@ -50,12 +31,13 @@ class HandWritingSynthesis(BaseModel):
             momentum=self.momentum,
             epsilon=self.epsilon,
             centered=self.centered,
+            clipvalue=10,
         )
 
     def __call__(self, strokes, sentence, states):
         if not hasattr(self, 'model'):
             self.make_model()
-        self.model(strokes, sentence, states)
+        return self.model([strokes, sentence, states])
 
     def make_model(self):
         strokes = Input((None, 3))
@@ -138,7 +120,8 @@ class HandWritingSynthesis(BaseModel):
         ]
 
         model = Model(inputs=[strokes, sentence, states], outputs=[mixture_coefs, output_states])
-        model.summary()
+        if self.verbose:
+            model.summary()
         self.model = model
 
     def train(self, strokes, sentence, states, targets):
@@ -148,18 +131,18 @@ class HandWritingSynthesis(BaseModel):
             targets = tf.dtypes.cast(targets, dtype=float)
             loss = self.loss_function(targets, predictions)
 
-            gradients = tape.gradient(loss, self.trainable_variables)
+            gradients = tape.gradient(loss, self.model.trainable_variables)
 
-        # Clips gradient for output Dense layer
-        gradients[-1] = tf.clip_by_value(gradients[-1], -100.0, 100.0)
-        gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
+        # # Clips gradient for output Dense layer
+        # gradients[-1] = tf.clip_by_value(gradients[-1], -100.0, 100.0)
+        # gradients[-2] = tf.clip_by_value(gradients[-2], -100.0, 100.0)
+        #
+        # # Clips gradient for LSTM layers
+        # for i, grad in enumerate(gradients[:-2]):
+        #     gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
 
-        # Clips gradient for LSTM layers
-        for i, grad in enumerate(gradients[:-2]):
-            gradients[i] = tf.clip_by_value(gradients[i], -10.0, 10.0)
-
-        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
-        self.windowedlstm.cell.phi = []
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+        self.model.get_layer(name='h1').cell.phi = []
         return loss
 
     def validation(self, strokes, sentence, states, targets):
@@ -171,11 +154,10 @@ class HandWritingSynthesis(BaseModel):
 
     def infer(
         self, sentence, bias=None,
-        inf_type='max',
         weights_path=None, reload=False,
         verbose=None, seed=None
     ):
-        self.windowedlstm.cell.phi = []
+        self.model.get_layer(name='h1').cell.phi = []
         np.random.seed(seed)
         if verbose:
             msg = ("Writing : \033[92m {sentence}\033[00m,"
@@ -206,7 +188,7 @@ class HandWritingSynthesis(BaseModel):
 
         while length < 1300:
             mixture_coefs, output_states =\
-                self(X, sentence, input_states, training=False)
+                self(X, sentence, input_states)
 
             # Heuristic described in paper phi(t, U+1) > phi(t, u) for 0<u<U+1
             kappa = output_states[-4]
@@ -223,7 +205,7 @@ class HandWritingSynthesis(BaseModel):
             alphas.append(alpha)
             betas.append(beta)
 
-            end_stroke, x, y = self._infer(mixture_coefs, inf_type=inf_type, bias=bias)
+            end_stroke, x, y = self._infer(mixture_coefs, bias=bias)
 
             # Next inputs
             X = np.array([x, y, end_stroke]).reshape((1, 1, 3))
@@ -240,5 +222,5 @@ class HandWritingSynthesis(BaseModel):
         print()
         print("Sampling finished, produced "
               "sequence of length :\033[92m {}\033[00m".format(length))
-        phis = self.windowedlstm.cell.phi
+        phis = self.model.get_layer(name='h1').cell.phi
         return np.vstack(strokes), windows, phis, kappas, alphas, betas

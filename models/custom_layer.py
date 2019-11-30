@@ -46,7 +46,6 @@ class WindowedLSTMCell(Layer):
         self.mixtures = mixtures
         self.activation = activations.get(activation)
         self.recurrent_activation = activations.get(recurrent_activation)
-        # self.use_bias = use_bias
 
         self.kernel_initializer = initializers.get(kernel_initializer)
         self.recurrent_initializer = initializers.get(recurrent_initializer)
@@ -54,7 +53,6 @@ class WindowedLSTMCell(Layer):
         self.bias_initializer = initializers.get(bias_initializer)
         self.mixture_initializer = initializers.get(mixture_initializer)
         self.bias_mixture_initializer = initializers.get(bias_mixture_initializer)
-        # self.unit_forget_bias = unit_forget_bias
 
         self.kernel_regularizer = regularizers.get(kernel_regularizer)
         self.recurrent_regularizer = regularizers.get(recurrent_regularizer)
@@ -156,6 +154,7 @@ class WindowedLSTMCell(Layer):
         phi = tf.reduce_sum(phi, axis=1)
         phi = tf.reshape(phi, (1, char_length))
         w = tf.squeeze(tf.matmul(phi, sentence), axis=1)
+        self.phi.append(phi)
         phi = tf.reshape(tf.reduce_max(phi), (1, 1))
         return w, kappa, phi, alpha, beta
 
@@ -190,3 +189,49 @@ class WindowedLSTMCell(Layer):
 
     def get_initial_state(self, inputs=None, batch_size=1, dtype=None):
         return [tf.zeros(shape) for shape in self.state_size]
+
+    def get_config(self):
+        config = {
+            'units':
+                self.units,
+            'window_size':
+                self.window_size,
+            'mixtures':
+                self.mixtures,
+            'activation':
+                activations.serialize(self.activation),
+            'recurrent_activation':
+                activations.serialize(self.recurrent_activation),
+            'kernel_initializer':
+                initializers.serialize(self.kernel_initializer),
+            'recurrent_initializer':
+                initializers.serialize(self.recurrent_initializer),
+            'window_initializer':
+                initializers.serialize(self.window_initializer),
+            'bias_initializer':
+                initializers.serialize(self.bias_initializer),
+            'mixture_initializer':
+                initializers.serialize(self.mixture_initializer),
+            'bias_mixture_initializer':
+                initializers.serialize(self.bias_mixture_initializer),
+            'kernel_regularizer':
+                regularizers.serialize(self.kernel_regularizer),
+            'recurrent_regularizer':
+                regularizers.serialize(self.recurrent_regularizer),
+            'window_regularizer':
+                regularizers.serialize(self.window_regularizer),
+            'bias_regularizer':
+                regularizers.serialize(self.bias_regularizer),
+            'mixture_regularizer':
+                regularizers.serialize(self.mixture_regularizer),
+            'bias_mixture_regularizer':
+                regularizers.serialize(self.bias_mixture_regularizer),
+            'kernel_constraint':
+                constraints.serialize(self.kernel_constraint),
+            'recurrent_constraint':
+                constraints.serialize(self.recurrent_constraint),
+            'bias_constraint':
+                constraints.serialize(self.bias_constraint),
+        }
+        base_config = super(WindowedLSTMCell(), self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))

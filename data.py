@@ -75,6 +75,15 @@ class Data(ABC):
             _ = self.sentences
         return self._validation_sentences.copy()
 
+    def scale_back(self, strokes):
+        if hasattr(strokes, "numpy"):
+            strokes = strokes.numpy()
+        if not hasattr(self, 'std1'):
+            _ = self.strokes
+        strokes[:, 1] = strokes[:, 1] * self.std1 + self.mean1
+        strokes[:, 2] = strokes[:, 2] * self.std2 + self.mean2
+        return strokes
+
     @abstractmethod
     def batch_generator(self, sequence_lenght, batch_size=10):
         raise NotImplementedError
@@ -82,25 +91,37 @@ class Data(ABC):
 
 class DataPrediction(Data):
 
-    def __init__(self, path_to_data='data/strokes-py3.npy'):
-        super(DataPrediction, self).__init__(path_to_data=path_to_data)
+    def __init__(
+        self,
+        path_to_data='data/strokes-py3.npy',
+        train_split=0.8,
+        scale=True,
+    ):
+        super(DataPrediction, self).__init__(
+            path_to_data=path_to_data,
+            train_split=train_split
+        )
+        self.scale = scale
 
-    def batch_generator(self, sequence_lenght, batch_size=10, data_type='train'):
+    def batch_generator(self, shuffle=False, data_type='train'):
         assert data_type in ['train', 'validation']
         # We want (x3, x1, x2) --> (x1, x2, x3)
         if data_type == 'train':
-            all_strokes = tf.gather(np.vstack(self.strokes), [1, 2, 0], axis=1)
+            all_strokes = self.strokes
         elif data_type == 'validation':
-            all_strokes = tf.gather(np.vstack(self.validation_strokes), [1, 2, 0], axis=1)
+            all_strokes = self.validation_strokes
         while True:
-            batch_strokes = []
-            batch_targets = []
-            for _ in range(batch_size):
-                strokes = tf.image.random_crop(all_strokes, (sequence_lenght+1, 3))
-                # batch_strokes.append(tf.concat((tf.zeros((1, 3)), strokes[:-1, :]), axis=0))
-                batch_strokes.append(strokes[:-1, :])
-                batch_targets.append(strokes[1:, :])
-            yield tf.stack(batch_strokes), tf.stack(batch_targets)
+            if shuffle:
+                np.random.shuffle(all_strokes)
+            for strokes in all_strokes:
+                strokes = strokes.copy()
+                if self.scale:
+                    strokes[:, 1] = (strokes[:, 1] - self.mean1) / self.std1
+                    strokes[:, 2] = (strokes[:, 2] - self.mean2) / self.std2
+                strokes = strokes.reshape((1,) + strokes.shape)
+                # We want (x3, x1, x2) --> (x1, x2, x3)
+                strokes = tf.dtypes.cast(tf.gather(strokes, [1, 2, 0], axis=2), dtype=float)
+                yield strokes[:, :-1, :], strokes[:, 1:, :]
 
 
 class DataSynthesis(Data):
@@ -111,6 +132,7 @@ class DataSynthesis(Data):
         clean_text=True,
         path_to_data='data/strokes-py3.npy',
         train_split=0.8,
+        scale=True,
     ):
         super(DataSynthesis, self).__init__(
             path_to_data=path_to_data,
@@ -118,6 +140,7 @@ class DataSynthesis(Data):
             clean_text=clean_text,
             train_split=train_split,
         )
+        self.scale = scale
 
     def batch_generator(self, batch_size=1, shuffle=True, data_type='train'):
         assert data_type in ['train', 'validation']
@@ -132,24 +155,12 @@ class DataSynthesis(Data):
             if shuffle:
                 np.random.shuffle(idx)
 
-            batch_strokes = []
-            batch_sentences = []
-            batch_targets = []
             for it in idx:
-                strokes, sentences = all_strokes[it], all_sentences[it]
-                strokes[:, 1] = (strokes[:, 1] - self.mean1) / self.std1
-                strokes[:, 2] = (strokes[:, 2] - self.mean2) / self.std2
+                strokes, sentences = all_strokes[it].copy(), all_sentences[it].copy()
+                if self.scale:
+                    strokes[:, 1] = (strokes[:, 1] - self.mean1) / self.std1
+                    strokes[:, 2] = (strokes[:, 2] - self.mean2) / self.std2
                 # We want (x3, x1, x2) --> (x1, x2, x3)
-                strokes = tf.gather(strokes, [1, 2, 0], axis=1)
-                batch_strokes.append(strokes[:-1, :])
-                batch_sentences.append(sentences)
-                batch_targets.append(strokes[1:, :])
-                if len(batch_strokes) == batch_size:
-                    yield (
-                        tf.dtypes.cast(tf.stack(batch_strokes), dtype=float),
-                        tf.dtypes.cast(tf.stack(batch_sentences), dtype=float),
-                        tf.dtypes.cast(tf.stack(batch_targets), dtype=float),
-                    )
-                    batch_strokes = []
-                    batch_sentences = []
-                    batch_targets = []
+                strokes = tf.dtypes.cast(tf.gather(strokes, [1, 2, 0], axis=1), dtype=float)
+                sentences = tf.dtypes.cast(sentences, dtype=float)
+                yield strokes[:-1, :], sentences, strokes[1:, :]

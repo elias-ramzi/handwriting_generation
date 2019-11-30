@@ -8,6 +8,7 @@ notebooks/.ipynb_checkpoints/*
 [Python]
 tmp/
 .venv/
+personal_experiments/
 
 [Models]
 models/trained/test/*.h5

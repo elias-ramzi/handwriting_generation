@@ -17,28 +17,24 @@ from models.handwriting_synthesis import HandWritingSynthesis
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-Run_ID = int(time.time())
+RUN_ID = int(time.time())
 
-
-MODEL_PATH = 'models/trained/test/model_synthesis_overfit.h5'
-EPOCH_MODEL_PATH = 'models/trained/test/model_synthesis_overfit_{}.h5'
 LOAD_PREVIOUS = None
+
+MODEL_PATH = 'models/trained/test/model_synthesis_{}.h5'.format(RUN_ID)
+EPOCH_MODEL_PATH = 'models/trained/test/model_synthesis_{}_{}.h5'.format(RUN_ID, '{}')
 DATA_PATH = 'data/strokes-py3.npy'
-HISTORY_PATH = 'models/history/test/history_experience.json'
+HISTORY_PATH = 'models/history/test/history_{}.json'.format(RUN_ID)
+LOG_PATH = 'models/logs/'
 
 VERBOSE = False
 
 model_kwargs = {
-    'regularizer_type': 'l2',
-    'reg_mean': 0.,
-    'reg_std': 0.,
-    'reg_l2': 0.,
     'lr': .0001,
     'rho': .95,
     'momentum': .9,
     'epsilon': .0001,
     'centered': True,
-    'inf_type': 'max',
 }
 
 HIDDEN_DIM = 400
@@ -59,10 +55,10 @@ validation_generator_kwargs = {
     'shuffle': True,
 }
 
-EPOCHS = 1
-STEPS_PER_EPOCH = 1
-VAL_STEPS = 1
-MODEL_CHECKPOINT = 5
+EPOCHS = 100
+STEPS_PER_EPOCH = 10
+VAL_STEPS = 0
+MODEL_CHECKPOINT = 20
 
 # bias for writing ~~style~~
 BIAS = None
@@ -78,7 +74,7 @@ WINDOW_SIZE = len(D.sentences[0][0])
 model_kwargs['vocab_size'] = WINDOW_SIZE
 hws = HandWritingSynthesis(**model_kwargs)
 hws.make_model()
-tensorboard_cb = TensorBoard(log_dir='logs/')
+tensorboard_cb = TensorBoard(log_dir=LOG_PATH)
 tensorboard_cb.set_model(hws.model)
 
 nan = False
@@ -108,6 +104,10 @@ history = {
     'validation_loss': [],
 }
 
+print()
+print("Running train with ID \033[92m {}\033[00m".format(RUN_ID))
+print()
+
 try:
     # Test for overfitting
     strokes, sentence, targets = next(generator)
@@ -132,11 +132,11 @@ try:
         mean_val_loss = np.mean(val_loss)
         history['train_loss'].append(mean_loss)
         history['validation_loss'].append(mean_val_loss)
-        print("Epoch {:03d}: Loss: {:.3f} / Validation loss : {:.3f}"
+        print("Epoch {:03d}: Loss:\033[93m {:.3f}\033[00m / Validation loss : {:.3f}"
               .format(e, mean_loss, mean_val_loss))
 
         if e % MODEL_CHECKPOINT == 0:
-            hws.save_weights(EPOCH_MODEL_PATH.format(e))
+            hws.model.save_weights(EPOCH_MODEL_PATH.format(e))
 
         if nan:
             break
@@ -145,32 +145,29 @@ except KeyboardInterrupt:
     pass
 
 if not nan:
-    hws.save_weights(MODEL_PATH)
+    hws.model.save_weights(MODEL_PATH)
 
+with open(HISTORY_PATH, 'w') as f:
+    json.dump(history, f, default=json_default)
 
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 # '''''''''''''''''''''''''''''' EVALUATE ''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 verbose_sentence = "".join(D.encoder.inverse_transform(sentence)[0])
-strokes1, windows, _, kappas, alphas, betas = hws.infer(
+strokes1, windows, phis, kappas, alphas, betas = hws.infer(
     sentence, inf_type='max',
     verbose=verbose_sentence,
 )
-phis = hws.windowedlstm.cell.phi
 weights = np.stack([np.squeeze(x.numpy()) for x in phis], axis=1)
-strokes1[:, 1] = strokes1[:, 1] * D.std1 + D.mean1
-strokes1[:, 2] = strokes1[:, 2] * D.std2 + D.mean2
 target = tf.gather(targets, [2, 0, 1], axis=2)[0].numpy()
-target[:, 1] = target[:, 1] * D.std1 + D.mean1
-target[:, 2] = target[:, 2] * D.std2 + D.mean2
+strokes1 = D.scale_back(strokes1)
+target = D.scale_back(target)
 
-with open(HISTORY_PATH, 'w') as f:
-    json.dump(history, f, default=json_default)
 
 plt.figure(figsize=(10, 8))
 plt.subplot(2, 1, 1)
-plt.title('Learn curv')
+plt.title('Learning curv')
 plt.plot(history['train_loss'], label='Training learn curv')
 plt.plot(history['validation_loss'], color='r', label='Validation learn curv')
 plt.subplot(2, 1, 2)
