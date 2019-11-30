@@ -57,8 +57,8 @@ validation_generator_kwargs = {
     'shuffle': True,
 }
 
-EPOCHS = 100
-STEPS_PER_EPOCH = 10
+EPOCHS = 1
+STEPS_PER_EPOCH = 1
 VAL_STEPS = 0
 MODEL_CHECKPOINT = 1
 
@@ -135,7 +135,6 @@ except KeyboardInterrupt:
 if not nan:
     hwp.model.save_weights(MODEL_PATH)
 
-
 with open(HISTORY_PATH, 'w') as f:
     json.dump(history, f, default=json_default)
 
@@ -144,7 +143,8 @@ with open(HISTORY_PATH, 'w') as f:
 # '''''''''''''''''''''''''''''''EVALUATE'''''''''''''''''''''''''''''''
 # ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 strokes1 = hwp.infer(seed=23)
-strokes1 = D.scale_back(strokes1)
+if data_kwargs['scale']:
+    strokes1 = D.scale_back(strokes1)
 
 plt.figure(figsize=(10, 5))
 plt.title('Learning curv')

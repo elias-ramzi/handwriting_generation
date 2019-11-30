@@ -82,7 +82,6 @@ class HandWritingPrediction(BaseModel):
                 )(strokes, initial_state=input_states[0:2])
             output_states += [ostateh1, ostatec1]
 
-            # skip1 = Dense(400, name='Wih2', use_bias=False)(strokes)
             _input2 = Concatenate(name='Skip1')([strokes, lstm1])
             lstm2, ostateh2, ostatec2 = LSTM(
                 400,
@@ -92,7 +91,6 @@ class HandWritingPrediction(BaseModel):
             )(_input2, initial_state=input_states[2:4])
             output_states += [ostateh2, ostatec2]
 
-            # skip2 = Dense(400, name='Wih3', use_bias=False)(strokes)
             _input3 = Concatenate(name='Skip2')([strokes, lstm2])
             lstm3, ostateh3, ostatec3 = LSTM(
                 400,
@@ -102,8 +100,6 @@ class HandWritingPrediction(BaseModel):
                 )(_input3, initial_state=input_states[4:6])
             output_states += [ostateh3, ostatec3]
 
-            # skip31 = Dense(400, name='Wh1y', use_bias=False)(lstm1)
-            # skip32 = Dense(400, name='Wh2y', use_bias=False)(lstm2)
             lstm = Concatenate(name='Skip3')([lstm1, lstm2, lstm3])
 
         y_hat = Dense(121, name='MixtureCoef')(lstm)
@@ -133,10 +129,7 @@ class HandWritingPrediction(BaseModel):
 
         with tf.GradientTape() as tape:
             outputs = self.model(inputs, training=True)
-            predictions = outputs[0]
-            targets = tf.dtypes.cast(targets, dtype=float)
-            loss = self.loss_function(targets, predictions)
-
+            loss = self.loss_function(targets, outputs[0])
             gradients = tape.gradient(loss, self.model.trainable_variables)
 
         # # Clips gradient for output Dense layer
